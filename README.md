@@ -200,6 +200,16 @@ controlador de prueba, **sin** ejecutar ningún algoritmo de RL.
 > `controller "locomotion_test"` (pon los demás en `"<none>"` o su controlador
 > de agente) y revierte la simulación tras cada cambio.
 
+> **Requisito — el robot debe ser Supervisor.** `locomotion_test` y el modo
+> kinemático leen/escriben el nodo propio con `getSelf()`, que **sólo** funciona
+> si el nodo del robot tiene `supervisor TRUE` en el `.wbt`. Si falta, Webots
+> registra `illegal call to wb_supervisor_node_get_self() in a 'Robot'
+> controller`, `getSelf()` devuelve `None` y antes el controlador reventaba con
+> `AttributeError: 'NoneType' ... getSFVec3f`. Ahora `locomotion_test` detecta
+> el caso, imprime un error accionable y sale limpiamente (`exit 1`) en vez de
+> reventar. **Solución:** añade `supervisor TRUE` al nodo del robot al que
+> asignes `locomotion_test`. (El `.wbt` lo gestionas tú; este repo no lo toca.)
+
 El comando se resuelve con **prioridad**: `controllerArgs` (argv[1]) → variable
 `LOCO_CMD` → por defecto `stand`. Comandos válidos: `stand | forward | left |
 right`. En el `.wbt`, sobre el robot a validar:

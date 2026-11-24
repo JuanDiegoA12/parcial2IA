@@ -99,6 +99,42 @@ def test_find_barriers_returns_twelve(fake_webots):
     assert all(name.startswith("valla") for name in barriers)
 
 
+def test_is_supervisor_true_when_self_node_resolves(fake_webots):
+    robot, _ = _make_robot(fake_webots, "DQN")
+    assert robot.is_supervisor() is True
+
+
+def test_non_supervisor_robot_is_tolerated(fake_webots):
+    # Si el robot NO es Supervisor, getSelf() devuelve None (en Webots real,
+    # además registra "illegal call to wb_supervisor_node_get_self()"). El
+    # robot debe construirse sin reventar, is_supervisor() == False, y las
+    # llamadas que necesitan el nodo propio deben lanzar un RuntimeError con el
+    # mensaje accionable en vez de un AttributeError sobre NoneType.
+    supervisor = fake_webots.make_supervisor(self_name="DQN")
+    supervisor.getSelf = lambda: None
+    robot = DarwinRobot(supervisor, "DQN")
+    assert robot.is_supervisor() is False
+    with pytest.raises(RuntimeError, match="supervisor TRUE"):
+        robot.get_position()
+    with pytest.raises(RuntimeError, match="supervisor TRUE"):
+        robot.get_orientation()
+    with pytest.raises(RuntimeError, match="supervisor TRUE"):
+        robot.reset_pose(1.0, 2.0)
+
+
+def test_non_supervisor_robot_tolerates_getself_raising(fake_webots):
+    # En Webots real getSelf() puede LANZAR en un controlador 'Robot'; la
+    # construcción debe tolerarlo y marcar is_supervisor() == False.
+    supervisor = fake_webots.make_supervisor(self_name="DQN")
+
+    def _raise():
+        raise RuntimeError("illegal call to wb_supervisor_node_get_self()")
+
+    supervisor.getSelf = _raise
+    robot = DarwinRobot(supervisor, "DQN")
+    assert robot.is_supervisor() is False
+
+
 def test_locomotion_noop_when_no_motors_resolve(fake_webots):
     # Backend sin getMotor/getDevice: ningún motor resuelve -> modo no-op con
     # warning, pero la locomoción sigue funcionando sin lanzar excepción.

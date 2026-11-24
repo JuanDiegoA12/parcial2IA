@@ -138,6 +138,15 @@ def main() -> None:
     robot_name = os.environ.get("LOCO_ROBOT", "DQN")
     robot = DarwinRobot(supervisor, robot_name)
 
+    # El robot debe ser Supervisor para leer/escribir su propio nodo (getSelf).
+    # Si el nodo del robot NO tiene 'supervisor TRUE', getSelf() devuelve None y
+    # cualquier get_position/reset_pose reventaría con AttributeError sobre
+    # NoneType. Avisar con un mensaje accionable y salir limpiamente.
+    if not robot.is_supervisor():
+        print("[locomotion_test] ERROR: " + robot.SUPERVISOR_REQUIRED_MSG,
+              file=sys.stderr)
+        sys.exit(1)
+
     command = _read_command()
     method = _COMMANDS[command]
     mode = config.resolve_locomotion_mode()

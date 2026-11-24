@@ -396,13 +396,46 @@ class DarwinRobot:
         self.name = name
         self.time_step = int(backend.getBasicTimeStep())
         self.locomotion = _LocomotionBackend(backend, config_path)
-        self._self_node = backend.getSelf()
+        # getSelf() devuelve el nodo propio SÓLO si el robot es Supervisor
+        # ('supervisor TRUE' en el .wbt). Si no lo es, Webots registra
+        # "illegal call to wb_supervisor_node_get_self() in a 'Robot'
+        # controller" y getSelf() devuelve None, lo que reventaría más tarde
+        # con AttributeError al pedir getField(...). Guardamos la llamada y
+        # dejamos self._self_node = None para que is_supervisor() lo detecte y
+        # el controlador avise con un mensaje accionable en vez de reventar.
+        try:
+            self._self_node = backend.getSelf()
+        except Exception:
+            self._self_node = None
         self._accel = self._safe_sensor("getAccelerometer", "Accelerometer")
         self._gyro = self._safe_sensor("getGyro", "Gyro")
         # Contador de ticks consecutivos con el acelerómetro fuera de banda.
         # Sólo tras FALL_ACCEL_PERSIST_STEPS seguidos se declara caída por
         # acelerómetro (persistencia tipo Walk.cpp); un pico aislado se ignora.
         self._accel_out_of_band = 0
+
+    # --- supervisor ---------------------------------------------------------
+    def is_supervisor(self) -> bool:
+        """True si el robot resolvió su nodo propio vía getSelf().
+
+        Es False cuando el nodo del robot NO tiene 'supervisor TRUE' en el
+        .wbt: en ese caso getSelf() devuelve None (o lanza) y no se puede leer
+        posición/orientación ni reubicar. Los controladores deben comprobarlo
+        y avisar con un mensaje accionable antes de usar el robot.
+        """
+        return self._self_node is not None
+
+    SUPERVISOR_REQUIRED_MSG = (
+        "Este robot no es Supervisor: getSelf() devolvió None. Añade "
+        "'supervisor TRUE' al nodo del robot en el .wbt para usar "
+        "locomotion_test / el modo kinemático."
+    )
+
+    def _require_self_node(self):
+        """Devuelve el nodo propio o lanza RuntimeError con mensaje accionable."""
+        if self._self_node is None:
+            raise RuntimeError(self.SUPERVISOR_REQUIRED_MSG)
+        return self._self_node
 
     # --- sensores -----------------------------------------------------------
     def _safe_sensor(self, getter_name: str, device_name: str):
@@ -455,12 +488,12 @@ class DarwinRobot:
 
     # --- estado -------------------------------------------------------------
     def get_position(self) -> Tuple[float, float, float]:
-        trans = self._self_node.getField("translation").getSFVec3f()
+        trans = self._require_self_node().getField("translation").getSFVec3f()
         return float(trans[0]), float(trans[1]), float(trans[2])
 
     def get_orientation(self) -> float:
         """Heading (rad) alrededor de z. 0 = mirando hacia +y (eje de carrera)."""
-        rot = self._self_node.getField("rotation").getSFRotation()
+        rot = self._require_self_node().getField("rotation").getSFRotation()
         axis_z = rot[2]
         angle = rot[3]
         return float(angle if axis_z >= 0 else -angle)
@@ -546,11 +579,12 @@ class DarwinRobot:
         NO se falsea avance mutando `translation` durante step(): el progreso
         debe emerger del gait.
         """
-        trans_field = self._self_node.getField("translation")
+        self_node = self._require_self_node()
+        trans_field = self_node.getField("translation")
         current = trans_field.getSFVec3f()
         new_z = current[2] if z is None else z
         trans_field.setSFVec3f([float(x), float(y), float(new_z)])
-        self._self_node.getField("rotation").setSFRotation([0.0, 0.0, 1.0, 0.0])
+        self_node.getField("rotation").setSFRotation([0.0, 0.0, 1.0, 0.0])
 
         # Pose de pie + fase de gait a cero. También se limpia cualquier acción
         # cinemática pendiente para que el modo kinematic arranque el episodio
@@ -560,7 +594,7 @@ class DarwinRobot:
         self.locomotion.hold_standing()
 
         # Reinicio de la física del nodo propio (solo Webots real).
-        reset_physics = getattr(self._self_node, "resetPhysics", None)
+        reset_physics = getattr(self_node, "resetPhysics", None)
         if reset_physics is not None:
             try:
                 reset_physics()

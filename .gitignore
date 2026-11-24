@@ -11,3 +11,4 @@ results/*.png
 
 # Webots
 .*.wbproj
+.*.jpg

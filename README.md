@@ -95,14 +95,23 @@ proximidad siga disparándose antes** del bloqueo, y por ENCIMA de
 `HARD_COLLISION_DISTANCE` (0.15). Las penalizaciones por proximidad/colisión y
 el cruce de `GOAL_Y` siguen **activos y sin cambios** en `race_env`.
 
-**Pin visual de pie (aproximación).** Cada tick se comanda la pose de pie a los
-motores, se llama a `resetPhysics()` y la escritura de `translation` fija la
-altura del torso a `KINEMATIC_STAND_Z` (`0.24`, z nominal de pie) con rotación
-de **yaw puro** sobre z (sin roll/pitch), para que el robot se deslice DE PIE en
-vez de acostado. Es una **aproximación visual**: como aquí no hay runtime de
+**Postura ERGUIDA de pie por tick (aproximación visual).** Cada tick, para
+**TODAS** las acciones (`stand`/`walk_forward`/`turn_left`/`turn_right`) —no sólo
+al avanzar— el modo kinematic endereza el nodo propio (`_apply_upright_pose` en
+`darwin_robot.py`): reescribe la rotación como **yaw puro** sobre z (sin
+roll/pitch, conservando el heading) y fija la altura del torso a
+`KINEMATIC_STAND_Z` (`0.24`, z nominal de pie), de modo que el robot se deslice
+**DE PIE** y no acostado/levitando. Además comanda a los motores la pose erguida
+`KINEMATIC_STANDING_POSE` (**piernas casi rectas**, brazos a los lados) en vez de
+la cuclilla `STANDING_POSE` del gait, y llama a `resetPhysics()`. Esta pose es
+una **aproximación visual** ajustable que **NO afecta el movimiento** (que es
+cinemático). El **movimiento y las colisiones no cambian**: sigue siendo el
+deslizamiento de pie del racer visual, mientras que el gait físico (Plan A) queda
+como el modo realista-pero-inestable opcional. Como aquí no hay runtime de
 Webots, el usuario debe **verificar en Webots** que (1) la velocidad es ~1 m/s
 con `LOCO_CMD=forward`; (2) el robot se detiene al llegar a una valla y puede
-girar para esquivarla; (3) el torso se mantiene a `z ~ 0.24` sin acostarse;
+girar para esquivarla; (3) el torso se mantiene DE PIE a `z ~ 0.24` sin
+acostarse —si **flota** sube `KINEMATIC_STAND_Z`, si se **hunde** bájalo—;
 (4) `is_fallen()` sigue `False`.
 
 **Tunables del modo kinematic** (todos en `config.py`, fuente única):
@@ -112,7 +121,8 @@ girar para esquivarla; (3) el torso se mantiene a `z ~ 0.24` sin acostarse;
 | `KINEMATIC_LINEAR_STEP` | Metros que avanza por tick de `walk_forward` (0.016 → 1.0 m/s a 16 ms). |
 | `KINEMATIC_ANGULAR_STEP` | Radianes que rota por tick de `turn_left`/`turn_right` (0.04 → ~143 °/s). |
 | `KINEMATIC_COLLISION_RADIUS` | Radio (0.3 m) dentro del cual una valla/robot delante bloquea el avance. |
-| `KINEMATIC_STAND_Z` | Altura (0.24 m) a la que se fija el torso (pin visual de pie). |
+| `KINEMATIC_STAND_Z` | Altura (0.24 m) a la que se fija el torso cada tick (pin visual de pie). Si el torso **flota**, súbelo; si se **hunde**, bájalo (de pie ~0.24–0.34). |
+| `KINEMATIC_STANDING_POSE` | Pose ERGUIDA (piernas casi rectas, brazos a los lados) que se comanda a los motores en kinematic, en vez de la cuclilla `STANDING_POSE` del gait. Aproximación visual ajustable; NO afecta el movimiento (cinemático). |
 
 En Plan B el robot avanza por `KINEMATIC_LINEAR_STEP` a lo largo de su heading
 (heading 0 mira a +y; avance `= (-sin θ·d, +cos θ·d)`, con `z` fija a

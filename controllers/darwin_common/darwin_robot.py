@@ -374,10 +374,11 @@ class _LocomotionBackend:
         girar suma +/- el paso angular al ángulo de rotación en z;
         theta = rot[3] si rot[2] >= 0, si no -rot[3].
 
-        Pin visual de pie (aproximación): al avanzar, la z se fija a
-        config.KINEMATIC_STAND_Z (no se hereda la z colapsada) y la rotación se
-        mantiene como yaw puro sobre z (roll/pitch = 0). El usuario debe
-        verificar en Webots que el torso no se acuesta a esa z.
+        Esta rama SÓLO toca x,y (y, al girar, el yaw en z). El pin visual de pie
+        (z = config.KINEMATIC_STAND_Z y la rotación yaw-pura roll/pitch = 0) lo
+        escribe ahora `_apply_upright_pose`, que corre CADA tick para TODAS las
+        acciones; así el robot se mantiene DE PIE también en stand/turn, no sólo
+        al avanzar. El usuario verifica en Webots que el torso no se acuesta.
         """
         if action is None:
             return
@@ -397,23 +398,59 @@ class _LocomotionBackend:
             theta = rot[3] if rot[2] >= 0 else -rot[3]
             if action == "walk_forward":
                 d = config.KINEMATIC_LINEAR_STEP
-                x, y, _z = trans_field.getSFVec3f()
+                x, y, z = trans_field.getSFVec3f()
                 x += -math.sin(theta) * d
                 y += math.cos(theta) * d
-                # Pin visual de pie: fija z a KINEMATIC_STAND_Z en vez de heredar
-                # la z (posiblemente colapsada), para que el robot se deslice DE
-                # PIE. Es una APROXIMACIÓN visual: la rotación ya es yaw puro
-                # ([0,0,1,theta], sin roll/pitch) y no se toca aquí. El usuario
-                # debe verificar en Webots que el torso no se acuesta.
-                trans_field.setSFVec3f(
-                    [float(x), float(y), float(config.KINEMATIC_STAND_Z)]
-                )
+                # Esta rama escribe SÓLO x,y y conserva la z vigente; el pin de z
+                # a KINEMATIC_STAND_Z lo aplica _apply_upright_pose el mismo tick,
+                # de modo que el resultado numérico (z fijada de pie) es idéntico
+                # pero ahora para TODAS las acciones, no sólo al avanzar.
+                trans_field.setSFVec3f([float(x), float(y), float(z)])
             elif action == "turn_left":
                 theta += config.KINEMATIC_ANGULAR_STEP
                 rot_field.setSFRotation([0.0, 0.0, 1.0, float(theta)])
             elif action == "turn_right":
                 theta -= config.KINEMATIC_ANGULAR_STEP
                 rot_field.setSFRotation([0.0, 0.0, 1.0, float(theta)])
+        except Exception:
+            pass
+
+    def _apply_upright_pose(self) -> None:
+        """Endereza el nodo propio cada tick: yaw puro + pin de z de pie.
+
+        Corre en modo kinematic para TODAS las acciones (stand/walk/turn), SIN la
+        guarda `queue_action` de `_apply_kinematic_motion`, escribiendo
+        directamente los campos del nodo propio (observable también bajo el mock,
+        que expone esos campos). Así:
+          - la rotación se reescribe como yaw puro sobre z ([0,0,1,theta], con
+            roll/pitch = 0), usando la MISMA convención de heading
+            (theta = rot[3] si rot[2] >= 0, si no -rot[3]); `get_orientation`
+            devuelve el MISMO heading (no cambia el signo);
+          - la translation conserva x,y (los produce el movimiento) y fija
+            z = config.KINEMATIC_STAND_Z para que el robot se deslice DE PIE.
+        NO mueve x,y (eso lo hace `_apply_kinematic_motion`); sólo endereza y fija
+        z. Defensivo: si falta getSelf, el nodo es None o algún campo falla, no
+        hace nada.
+        """
+        get_self = getattr(self.supervisor, "getSelf", None)
+        if get_self is None:
+            return
+        try:
+            node = get_self()
+        except Exception:
+            return
+        if node is None:
+            return
+        try:
+            trans_field = node.getField("translation")
+            rot_field = node.getField("rotation")
+            rot = rot_field.getSFRotation()
+            theta = rot[3] if rot[2] >= 0 else -rot[3]
+            rot_field.setSFRotation([0.0, 0.0, 1.0, float(theta)])
+            x, y, _z = trans_field.getSFVec3f()
+            trans_field.setSFVec3f(
+                [float(x), float(y), float(config.KINEMATIC_STAND_Z)]
+            )
         except Exception:
             pass
 
@@ -500,9 +537,14 @@ class _LocomotionBackend:
         arrastre por campos del Supervisor y reinicia la física para no
         acumular caída/deriva."""
         if self.mode == "kinematic":
-            # Mantener la pose de pie en los motores (no-op si no hay motores,
-            # p.ej. el mock), arrastrar al robot y reiniciar su física.
-            self.hold_standing()
+            # Comandar la pose ERGUIDA de kinematic a los motores (piernas casi
+            # rectas), NO la cuclilla del gait; no-op si no hay motores (mock).
+            self.hold_kinematic_standing()
+            # Enderezar el nodo (yaw puro + pin de z de pie) CADA tick para
+            # TODAS las acciones, arrastrar al robot y reiniciar su física. El
+            # orden postura/movimiento es indiferente: la postura sólo toca
+            # z/rotación y el movimiento sólo toca x,y.
+            self._apply_upright_pose()
             self._apply_kinematic_motion(self._kin_action)
             self._reset_self_physics()
             self._kin_action = None
@@ -529,9 +571,27 @@ class _LocomotionBackend:
             pass
 
     def hold_standing(self) -> None:
-        """Comanda la pose de pie sin avanzar la fase (estabilización)."""
+        """Comanda la pose de pie del gait (cuclilla) sin avanzar la fase.
+
+        Se usa en el camino del gait (stabilize/reset_pose y el modo gait). En
+        modo kinematic NO se usa: ahí se comanda la pose ERGUIDA vía
+        `hold_kinematic_standing`.
+        """
         self.engine.set_amplitudes(0.0, 0.0)
         self.apply_targets(self.engine.standing_pose())
+
+    def hold_kinematic_standing(self) -> None:
+        """Comanda a los motores la pose ERGUIDA del modo kinematic.
+
+        Comanda config.KINEMATIC_STANDING_POSE (piernas casi rectas), recortada
+        con `self.clamp` contra los límites reales del motor, en vez de la
+        cuclilla del gait. Es la pose visual de pie del Plan B; NO afecta el
+        movimiento (cinemático). No-op si no hay motores (mock).
+        """
+        self.apply_targets(
+            {name: self.clamp(name, angle)
+             for name, angle in config.KINEMATIC_STANDING_POSE.items()}
+        )
 
 
 def _queue(supervisor, action: Optional[str]) -> None:

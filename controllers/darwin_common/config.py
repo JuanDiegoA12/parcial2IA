@@ -250,12 +250,45 @@ KINEMATIC_ANGULAR_STEP: float = 0.04
 KINEMATIC_COLLISION_RADIUS: float = 0.3
 
 # Altura (z, m) a la que se fija el torso en el arrastre cinemático: pin visual
-# de pie. En vez de heredar la z colapsada, cada escritura de translation en
-# modo kinematic fija z = KINEMATIC_STAND_Z para que el robot se deslice DE PIE.
+# de pie. En vez de heredar la z colapsada, cada tick en modo kinematic fija
+# z = KINEMATIC_STAND_Z para que el robot se deslice DE PIE (la escritura la hace
+# _apply_upright_pose en darwin_robot.py, para TODAS las acciones).
 # Coincide con la z nominal de pie del DARwIn-OP (~0.24, rango ~0.23–0.25) y con
-# la z de arranque de DQN. Es una APROXIMACIÓN visual/cinemática: el usuario debe
-# verificar en Webots que el torso no se acuesta (ver notas arriba). AJUSTABLE.
+# la z de arranque de DQN.
+#
+# AJUSTE (no se adivina a ciegas): si en Webots el torso parece FLOTAR sobre la
+# pista, SUBE KINEMATIC_STAND_Z; si se HUNDE en el suelo, BÁJALO. El DARwIn-OP de
+# pie ronda ~0.32–0.34 al origen del pecho según el nodo, y los robots de pie del
+# .wbt se sitúan ~0.24–0.34, así que el rango útil típico está entre 0.24 y 0.34.
+# Es una APROXIMACIÓN visual/cinemática que el usuario afina mirando la pista.
 KINEMATIC_STAND_Z: float = 0.24
+
+# Pose ERGUIDA de pie para el modo kinematic (motor -> ángulo en rad). En modo
+# kinematic se comanda ESTA pose a los 20 motores cada tick, EN VEZ de la cuclilla
+# del gait STANDING_POSE, para que el robot se deslice DE PIE con las piernas casi
+# rectas (no agachado ni acostado). Piernas casi rectas con la rodilla sólo
+# levemente flexionada (para apoyar de pie sin "bloquearse"), caderas/tobillos
+# neutros, brazos caídos a los lados y cuello/cabeza neutros.
+#
+# IMPORTANTE: estos ángulos son una APROXIMACIÓN VISUAL que el usuario puede
+# afinar en Webots y que NO afectan el movimiento (el desplazamiento es
+# CINEMÁTICO: lo produce el arrastre de translation/rotation, no los motores).
+# Respetan los límites reales ASIMÉTRICOS y ESPEJADOS de JOINT_LIMITS con holgura
+# >= JOINT_LIMIT_MARGIN (la rodilla derecha es positiva, LegLowerR en [-0.02,2.25],
+# y la izquierda negativa, LegLowerL en [-2.25,0.03]), así el recorte nunca
+# dispara advertencias de Webots.
+KINEMATIC_STANDING_POSE: Dict[str, float] = {
+    "ShoulderR": 0.0, "ShoulderL": 0.0,
+    "ArmUpperR": 0.0, "ArmUpperL": 0.0,
+    "ArmLowerR": 0.0, "ArmLowerL": 0.0,
+    "PelvYR": 0.0, "PelvYL": 0.0,
+    "PelvR": 0.0, "PelvL": 0.0,
+    "LegUpperR": 0.0, "LegUpperL": 0.0,   # cadera neutra (pierna recta)
+    "LegLowerR": 0.1, "LegLowerL": -0.1,  # rodilla: leve flexión, signo espejado R+/L-
+    "AnkleR": 0.0, "AnkleL": 0.0,         # tobillo neutro
+    "FootR": 0.0, "FootL": 0.0,
+    "Neck": 0.0, "Head": 0.0,
+}
 
 
 def resolve_locomotion_mode() -> str:

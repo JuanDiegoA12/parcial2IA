@@ -43,10 +43,12 @@ def test_walk_forward_advances_along_plus_y_at_heading_zero(fake_webots):
     robot.walk_forward()
     robot.tick()
     x1, y1, z1 = robot.get_position()
-    # Avanza KINEMATIC_LINEAR_STEP en +y; x y z no cambian a heading 0.
+    # Avanza KINEMATIC_LINEAR_STEP en +y; x no cambia a heading 0. La z queda
+    # fijada a KINEMATIC_STAND_Z por el pin de postura erguida (que corre cada
+    # tick para todas las acciones), no hereda la z inicial.
     assert y1 - y0 == pytest.approx(config.KINEMATIC_LINEAR_STEP)
     assert x1 == pytest.approx(x0)
-    assert z1 == pytest.approx(z0)
+    assert z1 == pytest.approx(config.KINEMATIC_STAND_Z)
 
 
 def test_turn_left_increases_heading_by_angular_step(fake_webots):
@@ -129,7 +131,8 @@ def test_walk_forward_advances_by_config_linear_step(fake_webots):
     x1, y1, z1 = robot.get_position()
     assert y1 - y0 == pytest.approx(config.KINEMATIC_LINEAR_STEP)
     assert x1 == pytest.approx(x0)
-    assert z1 == pytest.approx(z0)
+    # La z queda fijada a KINEMATIC_STAND_Z por el pin de postura erguida.
+    assert z1 == pytest.approx(config.KINEMATIC_STAND_Z)
 
 
 def _place_self_behind(supervisor, target_xy, gap=0.2):
@@ -224,3 +227,68 @@ def test_kinematic_translation_pins_stand_z_and_upright(fake_webots):
     assert rot[0] == pytest.approx(0.0)
     assert rot[1] == pytest.approx(0.0)
     assert rot[2] == pytest.approx(1.0)
+
+
+# --- Postura ERGUIDA de pie (Plan B): pose y orientación por tick ------------
+# Estos tests observan la escritura de postura BAJO EL MOCK: _apply_upright_pose
+# escribe directamente los campos del nodo propio (sin la guarda queue_action),
+# así que el pin de z y la rotación yaw-pura SON observables, y hold_kinematic_
+# standing comanda la pose a los motores (también observable en el mock).
+
+def _do_action(robot, action):
+    """Encola la acción de alto nivel indicada (o nada para 'stand')."""
+    if action == "stand":
+        robot.stand()
+    elif action == "walk_forward":
+        robot.walk_forward()
+    elif action == "turn_left":
+        robot.turn_left()
+    elif action == "turn_right":
+        robot.turn_right()
+    else:  # pragma: no cover - guarda defensiva
+        raise ValueError(action)
+
+
+@pytest.mark.parametrize("action", ["stand", "walk_forward", "turn_left", "turn_right"])
+def test_upright_pose_pins_z_and_yaw_for_each_action(fake_webots, action):
+    # Para CADA acción, partiendo de una z colapsada y una rotación con
+    # roll/pitch, tras el tick la z queda en KINEMATIC_STAND_Z y la rotación es
+    # yaw puro (axis ~ (0,0,1), roll/pitch = 0).
+    robot, supervisor = _make_robot(fake_webots, "DQN")
+    node = supervisor.getSelf()
+    x, y, _z = node.translation
+    node.set_translation([x, y, 0.075])          # z colapsada
+    node.set_rotation([1.0, 0.0, 0.0, 0.5])      # roll/pitch (eje x)
+    _do_action(robot, action)
+    robot.tick()
+    _x1, _y1, z1 = robot.get_position()
+    assert z1 == pytest.approx(config.KINEMATIC_STAND_Z)
+    rot = node.rotation
+    assert rot[0] == pytest.approx(0.0)
+    assert rot[1] == pytest.approx(0.0)
+    assert rot[2] == pytest.approx(1.0)
+
+
+def test_upright_pose_preserves_heading_on_turn(fake_webots):
+    # La reescritura yaw-pura NO altera el signo/heading: tras turn_left+tick el
+    # heading sigue aumentando en KINEMATIC_ANGULAR_STEP.
+    robot, _ = _make_robot(fake_webots, "ppo")
+    h0 = robot.get_orientation()
+    robot.turn_left()
+    robot.tick()
+    assert robot.get_orientation() - h0 == pytest.approx(config.KINEMATIC_ANGULAR_STEP)
+
+
+def test_kinematic_commands_standing_pose_not_gait_crouch(fake_webots):
+    # Tras un tick en kinematic, los motores reciben KINEMATIC_STANDING_POSE
+    # (recortada), NO la cuclilla del gait STANDING_POSE.
+    robot, supervisor = _make_robot(fake_webots, "DQN")
+    robot.stand()
+    robot.tick()
+    for name in ("LegLowerR", "LegUpperR", "AnkleR", "LegLowerL"):
+        motor = supervisor.getMotor(name)
+        expected = robot.locomotion.clamp(name, config.KINEMATIC_STANDING_POSE[name])
+        assert motor.position == pytest.approx(expected)
+        # Y es DISTINTA de la cuclilla del gait (ya no se comanda esa pose).
+        gait_value = robot.locomotion.clamp(name, config.STANDING_POSE[name])
+        assert motor.position != pytest.approx(gait_value)

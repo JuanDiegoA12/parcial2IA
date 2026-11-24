@@ -1,0 +1,42 @@
+{
+  "project_type": "Webots R2025a reinforcement-learning simulation project in Python. Webots controllers (one Python folder per robot) plus a shared common package, an experiments/plotting layer, and a headless pytest suite that mocks the Webots API so nothing requires launching Webots.",
+  "language": "Python 3.12.3",
+  "build_system": "No build step. Pure Python. Dependencies declared in requirements.txt (installed by the user into their own env). Webots is already installed by the user and must NOT be installed or launched by any step.",
+  "test_framework": "pytest (python3 -m pytest). Tests live under tests/ and use a conftest.py fixture named fake_webots that mocks the Webots controller/Supervisor/Node/Field/Accelerometer/Gyro/Motor API and a mock managers module.",
+  "build_command": "python3 -m py_compile $(git ls-files '*.py')  # or per-file py_compile; there is no compiled build",
+  "test_command": "cd \"/home/juan/Documentos/parcial2 IA\" && python3 -m pytest tests/ -q",
+  "verification_instructions": "Run `python3 -m pytest tests/ -q` from WORKDIR. The core layer (config, darwin_robot, race_env) tests must pass with only numpy+gymnasium installed. Tests that need stable-baselines3, tensorflow, or matplotlib MUST guard their imports with pytest.importorskip so they skip (not fail) when those libs are absent. SB3 env validity is checked via stable_baselines3.common.env_checker.check_env against the mock backend. The SB3 smoke test trains each agent a handful of timesteps against the mock env and asserts a reloadable .zip. Experiments/plots are verified in a --quick reduced mode. Never launch Webots.",
+  "snapshot_or_generated_files": "models/*.zip (trained policies) and results/*.csv + results/*.png are produced at runtime and are not source; keep models/.gitkeep and results/.gitkeep. No checked-in generated snapshots otherwise.",
+  "environment_constraints": "No RL libraries are installed in the system interpreter at planning time (gymnasium/stable_baselines3 absent). Keep controllers/darwin_common importable with only numpy+gymnasium. Do NOT install Webots. Do NOT launch Webots. Do NOT modify requirements.md or any track/robot geometry in pista_atletismo_50m.wbt (only the controller field per robot, and only in FEAT-004).",
+  "contribution_requirements": "No AGENTS.md/CONTRIBUTING/.kiro steering files exist in the repo. Conventions to follow: comments and docstrings may be in Spanish; code identifiers in English. Keep each algorithm in its own file; shared robot/actions/env code in controllers/darwin_common. Keep SB3 hyperparameters default-ish and documented (no over-engineering); sophistication is reserved for the custom agent.",
+  "key_patterns": "CRITICAL: all 4 robots in the .wbt share DEF name 'DARWIN', so getFromDef('DARWIN') cannot disambiguate. Each controller gets ITSELF via supervisor.getSelf() and finds OTHER robots + barriers by scanning root world children and matching the string 'name' field (excluding self). Locomotion uses `from managers import RobotisOp2GaitManager, RobotisOp2MotionManager` (compiled Webots binary that may fail to import) behind a _LocomotionBackend abstraction with a documented fallback (direct motor control / no-op with warning) so headless tests run. The env is a gymnasium.Env consumed by SB3. Backend (real Webots vs mock) is dependency-injected into DarwinRobot/DarwinRaceEnv so tests pass a mock.",
+  "relevant_files": [
+    "/home/juan/Documentos/parcial2 IA/requirements.md  (spec, READ ONLY, Spanish)",
+    "/home/juan/Documentos/parcial2 IA/pista_atletismo_50m.wbt  (world; edit only controller fields, in FEAT-004)",
+    "/home/juan/Documentos/parcial2 IA/controllers/darwin_common/config.py",
+    "/home/juan/Documentos/parcial2 IA/controllers/darwin_common/darwin_robot.py",
+    "/home/juan/Documentos/parcial2 IA/controllers/darwin_common/race_env.py",
+    "/home/juan/Documentos/parcial2 IA/controllers/darwin_common/agent_runner.py",
+    "/home/juan/Documentos/parcial2 IA/controllers/ppo_agent/ppo_agent.py",
+    "/home/juan/Documentos/parcial2 IA/controllers/dqn_agent/dqn_agent.py",
+    "/home/juan/Documentos/parcial2 IA/controllers/a2c_agent/a2c_agent.py",
+    "/home/juan/Documentos/parcial2 IA/controllers/custom_agent/custom_agent.py",
+    "/home/juan/Documentos/parcial2 IA/experiments/run_experiments.py",
+    "/home/juan/Documentos/parcial2 IA/experiments/plot_results.py",
+    "/home/juan/Documentos/parcial2 IA/tests/conftest.py",
+    "/home/juan/Documentos/parcial2 IA/requirements.txt"
+  ],
+  "directory_structure": "WORKDIR=/home/juan/Documentos/parcial2 IA. controllers/darwin_common/ = shared robot layer, gym env, config, agent_runner. controllers/{ppo_agent,dqn_agent,a2c_agent,custom_agent}/ = one Webots Python controller per robot (folder name must match the .wbt controller field). experiments/ = run_experiments.py (>=20 configs -> results/*.csv) and plot_results.py (-> results/*.png). models/ = trained .zip policies. results/ = CSV + figures. tests/ = pytest suite + conftest.py Webots mock. World facts: finish line DEF START_FINISH at y=9 (race along y axis); 12 WorkBarrier obstacles; robots start at DQN(0.11,9.95), ppo(0.21,7.88), actor - critic(0.21,6.04), agente propio(0.21,11.99).",
+  "world_facts": {
+    "webots_version": "R2025a",
+    "robots": [
+      {"name": "DQN", "translation": [0.11, 9.95, 0.24], "controller_folder": "dqn_agent", "algo": "DQN"},
+      {"name": "ppo", "translation": [0.21, 7.88, 0.34], "controller_folder": "ppo_agent", "algo": "PPO"},
+      {"name": "actor - critic", "translation": [0.21, 6.04, 0.34], "controller_folder": "a2c_agent", "algo": "A2C"},
+      {"name": "agente propio", "translation": [0.21, 11.99, 0.34], "controller_folder": "custom_agent", "algo": "custom tabular Q-learning (Taller-2 placeholder)"}
+    ],
+    "finish_line": {"def": "START_FINISH", "translation": [0, 9, 0.014], "box_size": [0.18, 8, 0.008], "note": "race axis is y; goal plane y=9"},
+    "barriers": "12 WorkBarrier nodes named 'valla 1'..'valla 1(11)', x in [-16.7,16.7], y near -0.11 and y in [-12,-6]",
+    "all_robots_share_def": "DARWIN (do not use getFromDef to find a specific robot; match by name)"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "task_id": "task-darwin-race-rl",
+  "task_description": "Build a Webots R2025a reinforcement-learning project where 4 RL agents race humanoid DARwIn-OP robots on an existing track. Shared robot/env/config layer, 3 stable-baselines3 agents (PPO/DQN/A2C), >=20-config experiments with CSV metrics and matplotlib plots, a custom manual-learning agent (Taller-2 placeholder), and final .wbt controller wiring. All logic is unit-tested headless against a mocked Webots API; Webots is never launched here and the track geometry is never modified.",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}

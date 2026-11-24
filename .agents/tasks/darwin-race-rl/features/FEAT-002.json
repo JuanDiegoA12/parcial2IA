@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "The shared agent_runner helper plus the 3 stable-baselines3 controllers (PPO, DQN, A2C), one file each, following an identical pattern. Depends on FEAT-001 (uses DarwinRaceEnv/config). Keep hyperparameters default-ish and documented.",
+  "status": "pending",
+  "steps": [
+    "Create controllers/darwin_common/agent_runner.py: make_env(robot_name, backend, **overrides) builds a DarwinRaceEnv; train(algo_cls, env, timesteps, save_path, **hp) fits an SB3 model with MlpPolicy and saves a .zip; load(algo_cls, path) reloads; run_race(model, env, deterministic=True) runs one episode and returns a metrics dict {success, steps, cumulative_reward, falls, collisions}; get_mode() reads mode 'train'/'race' from CLI arg or the MODE env var. Import SB3 lazily inside functions so importing the module does not require stable-baselines3.",
+    "Create controllers/ppo_agent/ppo_agent.py: robot 'ppo'; train mode fits PPO MlpPolicy and saves models/ppo.zip; race mode loads and runs deterministically via agent_runner. Document chosen (default-ish) hyperparameters in Spanish comments.",
+    "Create controllers/dqn_agent/dqn_agent.py: robot 'DQN'; DQN MlpPolicy -> models/dqn.zip; same train/race structure.",
+    "Create controllers/a2c_agent/a2c_agent.py: robot 'actor - critic'; A2C MlpPolicy -> models/a2c.zip; same structure. Note the folder is a2c_agent so the .wbt controller field for that robot will be 'a2c_agent'.",
+    "Create tests/test_agent_runner.py (mode parsing from arg/env, run_race returns the expected metric keys against the mock env; SB3 parts guarded by importorskip) and tests/test_sb3_agents_smoke.py (for each of PPO/DQN/A2C: train a handful of timesteps against the mock env into a tmp path, assert the .zip exists and reloads; guarded by pytest.importorskip('stable_baselines3'))."
+  ],
+  "acceptance_criteria": [
+    "`python3 -m pytest tests/test_agent_runner.py tests/test_sb3_agents_smoke.py -q` passes or skips cleanly (skips only the SB3-dependent assertions when stable-baselines3 is absent; never errors).",
+    "Each of the three controller files compiles under py_compile.",
+    "agent_runner.get_mode() returns 'train'/'race' correctly from both a CLI argument and the MODE environment variable.",
+    "When stable-baselines3 is installed, the smoke test produces a reloadable .zip for each of PPO, DQN, and A2C."
+  ],
+  "verification": [
+    "cd \"/home/juan/Documentos/parcial2 IA\" && python3 -m pytest tests/test_agent_runner.py tests/test_sb3_agents_smoke.py -q",
+    "cd \"/home/juan/Documentos/parcial2 IA\" && python3 -m py_compile controllers/ppo_agent/ppo_agent.py controllers/dqn_agent/dqn_agent.py controllers/a2c_agent/a2c_agent.py controllers/darwin_common/agent_runner.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

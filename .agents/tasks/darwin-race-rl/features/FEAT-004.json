@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Final features, done LAST: the custom agent (manual learning, NO stable-baselines3) for robot 'agente propio', its integration into the experiments and plots as a 4th algorithm, the Webots .wbt controller wiring, a race-mode winner detector, and the README documenting how to run inside Webots. Depends on FEAT-001, FEAT-002, FEAT-003.",
+  "status": "pending",
+  "steps": [
+    "Create controllers/custom_agent/custom_agent.py: robot 'agente propio', a clean documented discretized tabular Q-learning loop reusing DarwinRaceEnv (no stable-baselines3). Discretize the 5-dim observation into bins, maintain a Q-table, epsilon-greedy action selection, TD update; train mode runs episodes and persists the Q-table (e.g. models/custom_qtable.npz), race mode loads it and acts greedily. Mark clearly in Spanish comments 'reemplazar con el algoritmo del Taller 2' with a TODO and an explicit extension point (a strategy method that can be overridden).",
+    "Edit experiments/run_experiments.py to add the custom algorithm as a 4th entry in the config generator and runner, and edit experiments/plot_results.py so the summary table and figures include the custom algorithm alongside PPO/DQN/A2C.",
+    "Edit pista_atletismo_50m.wbt: change ONLY the controller field of each robot block: DQN -> \"dqn_agent\", ppo -> \"ppo_agent\", 'actor - critic' -> \"a2c_agent\", 'agente propio' -> \"custom_agent\". Do NOT change translation, rotation, name, supervisor, selfCollision, or any track/barrier geometry.",
+    "Add a race-mode entry point (controllers/darwin_common/race.py or a function in agent_runner) that, given the 4 robots' positions each tick, detects which robot first crosses the finish line y=GOAL_Y and reports the winner name. Make the detection logic unit-testable against the mock backend.",
+    "Create README.md (Spanish ok) documenting: creating the Python env and `pip install -r requirements.txt`, that Webots is already installed and must be launched by the user, how to set MODE=train per controller to train each agent, how to run the experiments and plotting scripts, and how to run MODE=race for the final competition, plus the note that the custom agent is a Taller-2 placeholder.",
+    "Create/extend tests: tests/test_custom_agent.py (tabular agent trains a few episodes on the mock env, Q-table updates, run_race returns metrics), a winner-detection test against the mock, and a .wbt sanity test asserting exactly the 4 controller fields changed to the folder names and no geometry lines changed."
+  ],
+  "acceptance_criteria": [
+    "`python3 -m pytest tests/ -q` — the FULL suite passes (SB3/tensorflow/matplotlib-dependent tests skip cleanly if those libs are absent).",
+    "custom_agent.py uses no stable-baselines3 import and its Q-table changes after training on the mock env.",
+    "pista_atletismo_50m.wbt has exactly four controller fields set to dqn_agent/ppo_agent/a2c_agent/custom_agent and every robot/track/barrier translation, rotation, and geometry value is byte-identical to before (verifiable via git diff showing only controller lines).",
+    "The winner detector returns the name of the first robot to cross y=GOAL_Y in a mocked scenario.",
+    "README.md documents the full train -> experiments -> plot -> race workflow and names what the user runs inside Webots."
+  ],
+  "verification": [
+    "cd \"/home/juan/Documentos/parcial2 IA\" && python3 -m pytest tests/ -q",
+    "cd \"/home/juan/Documentos/parcial2 IA\" && git diff -- pista_atletismo_50m.wbt | grep '^[-+]' | grep -v '^[-+][-+]' | grep -v 'controller' ; echo \"(the grep above must print nothing: only controller lines may change)\"",
+    "cd \"/home/juan/Documentos/parcial2 IA\" && grep -c 'controller \"\\(dqn_agent\\|ppo_agent\\|a2c_agent\\|custom_agent\\)\"' pista_atletismo_50m.wbt"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

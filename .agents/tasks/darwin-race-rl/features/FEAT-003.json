@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Experiments and comparison layer: run_experiments.py (>=20 configs varying space size, start position, goal position, and algorithm hyperparameters; per-config metrics to results/*.csv via pandas) and plot_results.py (per-algorithm average tables + comparison figures for cumulative reward and success rate as PNGs via matplotlib Agg). Depends on FEAT-001 and FEAT-002 (uses the env and the 3 SB3 agents). The custom agent is added to these scripts later in FEAT-004.",
+  "status": "pending",
+  "steps": [
+    "Create experiments/__init__.py and experiments/run_experiments.py: a config generator enumerating >=20 configurations across space size, start position, goal position, and per-algorithm hyperparameters for PPO/DQN/A2C; run each config (using agent_runner against the mock backend when Webots is unavailable) and append metrics rows {algo, config_id, space_size, start, goal, cumulative_reward, success, steps_to_goal, falls, collisions} to results/experiments.csv via pandas. Provide a --quick flag that runs a reduced set with tiny timesteps for CI, and expose the config generator as an importable function so tests can assert the full set is >=20 without executing all of them.",
+    "Create experiments/plot_results.py: read results/experiments.csv, compute per-algorithm averages (summary table saved as results/summary.csv and printed), and render comparison figures results/cumulative_reward.png and results/success_rate.png using matplotlib with the Agg backend.",
+    "Create tests/test_experiments.py (the config generator yields >=20 configs; --quick run writes results CSV with the expected columns and >=1 row; SB3-dependent execution guarded by importorskip) and tests/test_plots.py (given a small synthetic CSV, plot_results writes the expected PNGs and summary.csv; guarded by importorskip('matplotlib'))."
+  ],
+  "acceptance_criteria": [
+    "`python3 -m pytest tests/test_experiments.py tests/test_plots.py -q` passes or skips cleanly.",
+    "The experiments config generator produces at least 20 distinct configurations varying all four required dimensions.",
+    "Quick mode writes results/experiments.csv (or a tmp CSV in tests) containing columns for algorithm, cumulative_reward, success, steps-to-goal, falls, and collisions.",
+    "plot_results.py produces results/cumulative_reward.png, results/success_rate.png, and results/summary.csv from a provided CSV."
+  ],
+  "verification": [
+    "cd \"/home/juan/Documentos/parcial2 IA\" && python3 -m pytest tests/test_experiments.py tests/test_plots.py -q",
+    "cd \"/home/juan/Documentos/parcial2 IA\" && python3 -m py_compile experiments/run_experiments.py experiments/plot_results.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

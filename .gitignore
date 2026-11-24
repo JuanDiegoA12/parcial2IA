@@ -1,0 +1,13 @@
+# Entornos virtuales y caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Artefactos generados en runtime (se conservan los .gitkeep)
+models/*.zip
+results/*.csv
+results/*.png
+
+# Webots
+.*.wbproj

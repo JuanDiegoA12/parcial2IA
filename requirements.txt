@@ -1,0 +1,9 @@
+# Entorno de RL para la carrera de robots DARwIn-OP en Webots.
+# Instalar con: pip install -r requirements.txt
+
+gymnasium>=0.29,<1.1        # API del entorno (gym moderno) consumida por SB3
+stable-baselines3>=2.0,<3.0 # algoritmos base: PPO, DQN, A2C
+tensorflow>=2.12,<2.18      # backend opcional para el agente propio / utilidades
+numpy>=1.24,<2.0            # cálculo numérico (vectores de observación, recompensa)
+pandas>=2.0,<3.0            # registro y tabulado de experimentos a CSV
+matplotlib>=3.7,<4.0        # gráficos comparativos de resultados

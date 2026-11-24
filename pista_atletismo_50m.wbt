@@ -7,8 +7,8 @@ WorldInfo {
   basicTimeStep 16
 }
 Viewpoint {
-  orientation -0.44429800231092 0.006036118594688737 0.8958587223523791 3.1172584064762248
-  position 6.5756414616733165 8.413381423679388 9.951581155573209
+  orientation -0.00040102249653360943 -0.00040706834637855297 0.999999836738146 4.734428377973964
+  position -0.076037311127645 18.66526156795688 0.4707119460799866
   followType "None"
 }
 Background {
@@ -40,28 +40,192 @@ DEF GROUND Solid {
   locked TRUE
 }
 DEF DARWIN Darwin-op {
-  translation 0.11 9.95 0.24
+  hidden translation_10 0 0 0.051
+  hidden rotation_10 0.5774169284489886 0.5773169366740055 0.5773169366733298 2.0944000111568575
+  hidden translation_11 0 0 0
+  hidden rotation_11 1 0 0 0.5954000279131729
+  hidden translation_15 -0.005 0.037 -0.122
+  hidden rotation_15 0.5696584634717805 0.5811579970206664 0.5811579970144926 2.1060003719336544
+  hidden translation_16 0 0 0
+  hidden rotation_16 0 0 1 0.010000586727754683
+  hidden translation_17 0 0 0
+  hidden rotation_17 -1 0 0 1.1499994296692289
+  hidden translation_18 0 -0.093 0
+  hidden rotation_18 0.9999999999999999 0 0 2.250001396557757
+  hidden translation_19 0 -0.093 0
+  hidden rotation_19 -1 0 0 1.2299995071565084
+  hidden translation_20 0 0 0
+  hidden rotation_20 0 0 -0.9999999999999999 0.019999386248291763
+  hidden translation_21 -0.005 -0.037 -0.122
+  hidden rotation_21 0.5734770891898278 0.5792771479057317 0.5792771479081177 2.100200290406043
+  hidden translation_22 0 0 0
+  hidden rotation_22 0 0 -1 0.020000589770170663
+  hidden translation_23 0 0 0
+  hidden rotation_23 -1 0 0 1.1500004848871312
+  hidden translation_24 0 -0.093 0
+  hidden rotation_24 1 0 0 2.2500006541857465
+  hidden translation_25 0 -0.093 0
+  hidden rotation_25 -1 0 0 1.2200004825798159
+  hidden translation_26 0 0 0
+  hidden rotation_26 0 0 1 0.04999940413523675
+  hidden translation_27 0 0.082 0
+  hidden rotation_27 0.6733928805702268 0.6733928805712183 0.3050967990545446 2.5493999590421854
+  hidden translation_28 0 -0.016 0
+  hidden rotation_28 0 0 0.9999999999999999 0.42539996295966337
+  hidden translation_29 0 -0.06 0.016
+  hidden rotation_29 -1 0 0 2.0907999787630964
+  hidden translation_30 0 -0.082 0
+  hidden rotation_30 0.6825799516488567 0.6825799516468691 0.2610923576376808 2.630699954125017
+  hidden translation_31 0 -0.016 0
+  hidden rotation_31 0 0 -1 0.455400044329468
+  hidden translation_32 0 -0.06 0.016
+  hidden rotation_32 -0.9999999999999999 0 0 2.080799981141001
+  translation 0.218811 9.95112 0.224019
+  rotation -0.04828428093799813 0.9981000579804621 -0.038274044386485684 0.1247171680302108
   name "DQN"
   controller "dqn_agent"
   supervisor TRUE
   selfCollision TRUE
 }
 DEF DARWIN Darwin-op {
-  translation 0.21 11.99 0.34
+  hidden translation_10 0 0 0.051
+  hidden rotation_10 0.5774169284390679 0.5773169366789674 0.5773169366782908 2.0944000111717385
+  hidden translation_11 0 0 0
+  hidden rotation_11 0.9999999999999999 0 0 0.5954000279132221
+  hidden translation_15 -0.005 0.037 -0.122
+  hidden rotation_15 0.5696584199924598 0.5811580183307019 0.5811580183234383 2.1060004375876056
+  hidden translation_16 0 0 0
+  hidden rotation_16 0 0 1 0.010000794907836525
+  hidden translation_17 0 0 0
+  hidden rotation_17 -1 0 0 1.1500006350100112
+  hidden translation_18 0 -0.093 0
+  hidden rotation_18 1 0 0 2.2500014071813164
+  hidden translation_19 0 -0.093 0
+  hidden rotation_19 -1 0 0 1.2299994437693147
+  hidden translation_20 0 0 0
+  hidden rotation_20 0 0 -1 0.0199993260196802
+  hidden translation_21 -0.005 -0.037 -0.122
+  hidden rotation_21 0.5734770323421438 0.5792771760446241 0.579277176047713 2.10020037596324
+  hidden translation_22 0 0 0
+  hidden rotation_22 0 0 -1 0.02000079001108878
+  hidden translation_23 0 0 0
+  hidden rotation_23 -1 0 0 1.1499993632165781
+  hidden translation_24 0 -0.093 0
+  hidden rotation_24 1 0 0 2.25000071647283
+  hidden translation_25 0 -0.093 0
+  hidden rotation_25 -1 0 0 1.220000525090235
+  hidden translation_26 0 0 0
+  hidden rotation_26 0 0 1 0.04999934359142341
+  hidden translation_27 0 0.082 0
+  hidden rotation_27 0.6733928805702157 0.6733928805712069 0.30509679905459397 2.5493999590420953
+  hidden translation_28 0 -0.016 0
+  hidden rotation_28 0 0 1 0.42539996366499383
+  hidden translation_29 0 -0.06 0.016
+  hidden rotation_29 -1 0 0 2.09079997876312
+  hidden translation_30 0 -0.082 0
+  hidden rotation_30 0.6825799516488679 0.6825799516468802 0.26109235763762156 2.630699954125128
+  hidden translation_31 0 -0.016 0
+  hidden rotation_31 0 0 -1 0.45539995561003727
+  hidden translation_32 0 -0.06 0.016
+  hidden rotation_32 -0.9999999999999999 0 0 2.0807999811409736
+  translation 0.22219639372414893 11.991556359869625 0.23394707300688156
+  rotation -0.04795603135330226 0.9979077045991287 -0.043363949987738265 0.12474320478337143
   name "agente propio"
   controller "custom_agent"
   supervisor TRUE
   selfCollision TRUE
 }
 DEF DARWIN Darwin-op {
-  translation 0.21 7.88 0.34
+  hidden translation_10 0 0 0.051
+  hidden rotation_10 0.5774169284390687 0.577316936678967 0.5773169366782903 2.094400011171737
+  hidden translation_11 0 0 0
+  hidden rotation_11 1 0 0 0.5954000279132251
+  hidden translation_15 -0.005 0.037 -0.122
+  hidden rotation_15 0.5696584199924594 0.581158018330702 0.5811580183234385 2.106000437587606
+  hidden translation_16 0 0 0
+  hidden rotation_16 0 0 1 0.01000079490788093
+  hidden translation_17 0 0 0
+  hidden rotation_17 -1 0 0 1.1500006350099992
+  hidden translation_18 0 -0.093 0
+  hidden rotation_18 1 0 0 2.25000140718132
+  hidden translation_19 0 -0.093 0
+  hidden rotation_19 -1 0 0 1.2299994437693083
+  hidden translation_20 0 0 0
+  hidden rotation_20 0 0 -1 0.0199993260196802
+  hidden translation_21 -0.005 -0.037 -0.122
+  hidden rotation_21 0.5734770323421507 0.5792771760446208 0.5792771760477097 2.1002003759632295
+  hidden translation_22 0 0 0
+  hidden rotation_22 0 0 -1 0.020000790011066576
+  hidden translation_23 0 0 0
+  hidden rotation_23 -1 0 0 1.1499993632165746
+  hidden translation_24 0 -0.093 0
+  hidden rotation_24 1 0 0 2.250000716472831
+  hidden translation_25 0 -0.093 0
+  hidden rotation_25 -1 0 0 1.220000525090229
+  hidden translation_26 0 0 0
+  hidden rotation_26 0 0 1 0.04999934359139677
+  hidden translation_27 0 0.082 0
+  hidden rotation_27 0.6733928805702157 0.6733928805712072 0.30509679905459386 2.5493999590420953
+  hidden translation_28 0 -0.016 0
+  hidden rotation_28 0 0 1 0.4253999636649928
+  hidden translation_29 0 -0.06 0.016
+  hidden rotation_29 -0.9999999999999999 0 0 2.09079997876312
+  hidden translation_30 0 -0.082 0
+  hidden rotation_30 0.6825799516488678 0.6825799516468802 0.26109235763762184 2.6306999541251272
+  hidden translation_31 0 -0.016 0
+  hidden rotation_31 0 0 -1 0.45539995561003627
+  hidden translation_32 0 -0.06 0.016
+  hidden rotation_32 -0.9999999999999999 0 0 2.0807999811409736
+  translation 0.22219639372412725 7.881556359869569 0.23394707300688167
+  rotation -0.04795603135332893 0.9979077045990822 -0.04336394998877896 0.1247432047833685
   name "ppo"
   controller "ppo_agent"
   supervisor TRUE
   selfCollision TRUE
 }
 DEF DARWIN Darwin-op {
-  translation 0.21 6.04 0.34
+  hidden translation_10 0 0 0.051
+  hidden rotation_10 0.5774169284390687 0.577316936678967 0.5773169366782903 2.094400011171737
+  hidden translation_11 0 0 0
+  hidden rotation_11 1 0 0 0.5954000279132251
+  hidden translation_15 -0.005 0.037 -0.122
+  hidden rotation_15 0.5696584199924594 0.581158018330702 0.5811580183234385 2.106000437587606
+  hidden translation_16 0 0 0
+  hidden rotation_16 0 0 1 0.01000079490788093
+  hidden translation_17 0 0 0
+  hidden rotation_17 -1 0 0 1.1500006350099992
+  hidden translation_18 0 -0.093 0
+  hidden rotation_18 1 0 0 2.25000140718132
+  hidden translation_19 0 -0.093 0
+  hidden rotation_19 -1 0 0 1.2299994437693083
+  hidden translation_20 0 0 0
+  hidden rotation_20 0 0 -1 0.0199993260196802
+  hidden translation_21 -0.005 -0.037 -0.122
+  hidden rotation_21 0.5734770323421507 0.5792771760446208 0.5792771760477097 2.1002003759632295
+  hidden translation_22 0 0 0
+  hidden rotation_22 0 0 -1 0.020000790011066576
+  hidden translation_23 0 0 0
+  hidden rotation_23 -1 0 0 1.1499993632165746
+  hidden translation_24 0 -0.093 0
+  hidden rotation_24 1 0 0 2.250000716472831
+  hidden translation_25 0 -0.093 0
+  hidden rotation_25 -1 0 0 1.220000525090229
+  hidden translation_26 0 0 0
+  hidden rotation_26 0 0 1 0.04999934359139677
+  hidden translation_27 0 0.082 0
+  hidden rotation_27 0.6733928805702157 0.6733928805712072 0.30509679905459386 2.5493999590420953
+  hidden translation_28 0 -0.016 0
+  hidden rotation_28 0 0 1 0.4253999636649928
+  hidden translation_29 0 -0.06 0.016
+  hidden rotation_29 -0.9999999999999999 0 0 2.09079997876312
+  hidden translation_30 0 -0.082 0
+  hidden rotation_30 0.6825799516488678 0.6825799516468802 0.26109235763762184 2.6306999541251272
+  hidden translation_31 0 -0.016 0
+  hidden rotation_31 0 0 -1 0.45539995561003627
+  hidden translation_32 0 -0.06 0.016
+  hidden rotation_32 -0.9999999999999999 0 0 2.0807999811409736
+  translation 0.22219639372412725 6.041556359869569 0.23394707300688167
+  rotation -0.04795603135332893 0.9979077045990822 -0.04336394998877896 0.1247432047833685
   name "actor - critic"
   controller "a2c_agent"
   supervisor TRUE

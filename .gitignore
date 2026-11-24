@@ -1,14 +1,48 @@
-# Entornos virtuales y caches
+# === Entornos virtuales y cachés de Python ===
 .venv/
+venv/
+env/
+ENV/
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
-# Artefactos generados en runtime (se conservan los .gitkeep)
+# === Empaquetado / build de Python ===
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# === Artefactos generados en runtime (se conservan los .gitkeep) ===
 models/*.zip
+models/*.npz
 results/*.csv
 results/*.png
+# Logs de entrenamiento (TensorBoard / SB3)
+runs/
+tb_logs/
+*.log
 
-# Webots
+# === Webots ===
+# Archivos ocultos de proyecto/caché del simulador
 .*.wbproj
 .*.jpg
+.*.cache
+
+# === Sistema operativo ===
+.DS_Store
+Thumbs.db
+
+# === Editores / IDE ===
+.vscode/
+.idea/
+*.swp
+*~
+
+# === Artefactos internos del agente (opcional: trabajo local) ===
+# Descomenta si NO quieres compartir los planes/revisiones de los workflows:
+# .agents/

@@ -205,13 +205,16 @@ STABILIZATION_STEPS: int = 80
 # las penalizaciones por proximidad/colisión y el cruce de GOAL_Y siguen
 # contando exactamente igual que en modo gait.
 
-# Modo por defecto: 'gait' (Plan A). La tarea autoritativa EXIGE locomoción por
-# motores y PROHÍBE el desplazamiento artificial vía translation, así que el gait
-# sinusoidal físico es el modo por defecto y la detección de caída queda activa.
-# El modo 'kinematic' (Plan B) queda como opción OPT-IN, seleccionable sólo con
-# la variable de entorno LOCOMOTION_MODE=kinematic. Valores válidos: 'gait' |
+# Modo por defecto: 'kinematic' (Plan B), por DECISIÓN EXPLÍCITA del usuario.
+# El foco del trabajo es la carrera y la evaluación de agentes (PPO/DQN/A2C/
+# propio), no la marcha humanoide; el modo 'kinematic' arrastra al robot de pie
+# vía Supervisor (translation/rotation), is_fallen() queda en False, pero las
+# penalizaciones por proximidad/colisión y el cruce de GOAL_Y SIGUEN activos.
+# El modo 'gait' (Plan A, gait sinusoidal por motores con detección de caída)
+# queda disponible como opción, seleccionable con la variable de entorno
+# LOCOMOTION_MODE=gait o cambiando esta constante. Valores válidos: 'gait' |
 # 'kinematic'.
-LOCOMOTION_MODE: str = "gait"
+LOCOMOTION_MODE: str = "kinematic"
 
 # Paso lineal del arrastre cinemático: metros que avanza el robot por cada tick
 # de walk_forward, a lo largo de su heading. Igual al WALK_DELTA del mock para

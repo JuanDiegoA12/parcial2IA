@@ -204,6 +204,14 @@ STABILIZATION_STEPS: int = 80
 # En modo kinematic la caída se desactiva (is_fallen() devuelve False), pero
 # las penalizaciones por proximidad/colisión y el cruce de GOAL_Y siguen
 # contando exactamente igual que en modo gait.
+#
+# QUÉ VERIFICAR EN WEBOTS REAL (el modo kinematic refinado; aquí no hay runtime):
+#   1) velocidad ~1 m/s con LOCO_CMD=forward (KINEMATIC_LINEAR_STEP a 16 ms/tick);
+#   2) el robot se DETIENE al llegar a una valla (no la penetra) y puede girar
+#      para esquivarla (el giro nunca se bloquea);
+#   3) el torso se mantiene a z ~ KINEMATIC_STAND_Z (~0.24), sin acostarse,
+#      y la orientación es yaw puro (sin roll/pitch);
+#   4) is_fallen() sigue devolviendo False en kinematic.
 
 # Modo por defecto: 'kinematic' (Plan B), por DECISIÓN EXPLÍCITA del usuario.
 # El foco del trabajo es la carrera y la evaluación de agentes (PPO/DQN/A2C/
@@ -217,14 +225,37 @@ STABILIZATION_STEPS: int = 80
 LOCOMOTION_MODE: str = "kinematic"
 
 # Paso lineal del arrastre cinemático: metros que avanza el robot por cada tick
-# de walk_forward, a lo largo de su heading. Igual al WALK_DELTA del mock para
-# que la magnitud del movimiento sea idéntica bajo el mock y en Webots real.
-# AJUSTABLE en Webots.
-KINEMATIC_LINEAR_STEP: float = 0.25
+# de walk_forward, a lo largo de su heading. ESTA es la ÚNICA fuente de la
+# velocidad: tanto el desplazamiento real en Webots (darwin_robot.py) como el
+# mock de los tests (tests/conftest.py, WALK_DELTA) leen esta constante.
+# Derivación a basicTimeStep = 16 ms = 0.016 s/tick:
+#   0.016 m/tick / 0.016 s/tick = 1.0 m/s  (paso humano, realista para la carrera).
+# Antes era 0.25 m/tick = ~15.6 m/s (irreal; hacía trivial la carrera). AJUSTABLE.
+KINEMATIC_LINEAR_STEP: float = 0.016
 
 # Paso angular del arrastre cinemático: radianes que rota el robot por cada
-# tick de turn_left/turn_right. Igual al TURN_DELTA del mock. AJUSTABLE.
-KINEMATIC_ANGULAR_STEP: float = 0.20
+# tick de turn_left/turn_right. Igual al TURN_DELTA del mock (misma fuente única).
+# Derivación a 16 ms/tick: 0.04 rad/tick / 0.016 s/tick = 2.5 rad/s ≈ 143 °/s
+#   (giro suave pero usable). Antes 0.20 rad/tick = 12.5 rad/s ≈ 716 °/s. AJUSTABLE.
+KINEMATIC_ANGULAR_STEP: float = 0.04
+
+# Radio de colisión del arrastre cinemático (m): antes de COMPROMETER un avance
+# de walk_forward se calcula la (x,y) de destino; si cae dentro de este radio de
+# alguna valla (find_barriers) u otro robot (find_others) el avance se CANCELA
+# para ese tick (el robot no penetra el obstáculo). El giro NUNCA se bloquea, de
+# modo que el agente puede reorientarse y esquivar. Valor ~ semiancho del robot
+# (~0.15) + semiespesor de la valla (~0.15). Queda por DEBAJO de SAFETY_RADIUS
+# (0.6), para que la penalización por proximidad siga disparándose ANTES del
+# bloqueo, y por ENCIMA de HARD_COLLISION_DISTANCE (0.15). AJUSTABLE en Webots.
+KINEMATIC_COLLISION_RADIUS: float = 0.3
+
+# Altura (z, m) a la que se fija el torso en el arrastre cinemático: pin visual
+# de pie. En vez de heredar la z colapsada, cada escritura de translation en
+# modo kinematic fija z = KINEMATIC_STAND_Z para que el robot se deslice DE PIE.
+# Coincide con la z nominal de pie del DARwIn-OP (~0.24, rango ~0.23–0.25) y con
+# la z de arranque de DQN. Es una APROXIMACIÓN visual/cinemática: el usuario debe
+# verificar en Webots que el torso no se acuesta (ver notas arriba). AJUSTABLE.
+KINEMATIC_STAND_Z: float = 0.24
 
 
 def resolve_locomotion_mode() -> str:

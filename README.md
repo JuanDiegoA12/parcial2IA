@@ -51,47 +51,79 @@ El proyecto se centra en la **carrera** y en **evaluar los agentes de RL**
 locomoción** intercambiables con una sola bandera, y ambos conservan las mismas
 acciones discretas, el mismo `DarwinRaceEnv` y los mismos agentes:
 
-- **Plan A — `gait` (por defecto):** gait sinusoidal físico que acciona los 20
-  motores del DARwIn-OP cada paso (el `_GaitEngine` descrito abajo). Es la
-  locomoción "de verdad" que exige la tarea (locomoción por motores, sin
-  desplazamiento artificial vía `translation`) y la que deja **activa la
-  detección de caída**. Es el modo por defecto.
-- **Plan B — `kinematic` (OPT-IN):** arrastre cinemático tipo "tortuga"
+- **Plan B — `kinematic` (por defecto):** arrastre cinemático tipo "tortuga"
   diferencial. El **Supervisor desliza al robot DE PIE** escribiendo
   directamente los campos `translation`/`rotation` cada paso (teletransporte por
-  paso). **No** es el modo por defecto: sólo se activa explícitamente con
-  `LOCOMOTION_MODE=kinematic`. Es *time-safe* (no hay que ajustar la marcha
-  física), pero en este modo la caída está desactivada, por lo que queda como
-  alternativa para pruebas rápidas, no como locomoción de entrega.
+  paso). Es una **decisión de diseño** del usuario: el foco es la **carrera** y
+  **evaluar agentes**, no la marcha, así que este modo es *time-safe* (no hay
+  que ajustar el gait físico). En este modo la caída está desactivada, pero el
+  movimiento ahora es **realista** y los **obstáculos bloquean el avance** (ver
+  abajo). Es el modo por defecto.
+- **Plan A — `gait` (OPT-IN, sin cambios):** gait sinusoidal físico que acciona
+  los 20 motores del DARwIn-OP cada paso (el `_GaitEngine` descrito abajo). Es la
+  locomoción "de verdad" (por motores, sin desplazamiento artificial) y la que
+  deja **activa la detección de caída**. Se activa con `LOCOMOTION_MODE=gait` y
+  queda **exactamente igual que antes** (byte-for-byte).
 
 **Seleccionar el modo.** Vía la constante `config.LOCOMOTION_MODE`
-(`"gait"` | `"kinematic"`, por defecto `"gait"`) o, con prioridad, la
+(`"gait"` | `"kinematic"`, por defecto `"kinematic"`) o, con prioridad, la
 variable de entorno `LOCOMOTION_MODE`. El modo se resuelve con
 `config.resolve_locomotion_mode()` al construir el robot. Ejemplo:
 
 ```bash
-LOCOMOTION_MODE=gait  webots pista_atletismo_50m.wbt   # Plan A (gait físico)
-LOCOMOTION_MODE=kinematic webots pista_atletismo_50m.wbt  # Plan B (arrastre)
+webots pista_atletismo_50m.wbt                            # Plan B (kinematic, por defecto)
+LOCOMOTION_MODE=gait  webots pista_atletismo_50m.wbt      # Plan A (gait físico, opt-in)
 ```
 
-**Tunables del modo kinematic** (en `config.py`):
+#### Modo kinematic refinado (velocidad realista + colisiones + pin de pie)
+
+**Velocidad realista.** `KINEMATIC_LINEAR_STEP = 0.016` m/tick. A
+`basicTimeStep = 16 ms` (0.016 s/tick) eso da **1.0 m/s**, un paso humano
+(antes 0.25 m/tick ≈ 15.6 m/s, irreal). El giro
+`KINEMATIC_ANGULAR_STEP = 0.04` rad/tick ≈ **143 °/s**. La velocidad se afina en
+**UN solo lugar** (`config.py`): tanto el desplazamiento real en Webots como el
+mock de los tests leen estas mismas constantes.
+
+**Los obstáculos BLOQUEAN el avance.** Antes de comprometer un `walk_forward`,
+el modo kinematic calcula la `(x,y)` de destino; si cae dentro de
+`KINEMATIC_COLLISION_RADIUS` (`0.3` m = semiancho del robot + semiespesor de la
+valla) de alguna valla (`find_barriers`) u otro robot (`find_others`), el avance
+se **cancela** para ese tick, de modo que el robot **no penetra** el obstáculo.
+El **giro nunca se bloquea**, así el agente puede reorientarse y esquivar. El
+radio queda por DEBAJO de `SAFETY_RADIUS` (0.6) para que la **penalización por
+proximidad siga disparándose antes** del bloqueo, y por ENCIMA de
+`HARD_COLLISION_DISTANCE` (0.15). Las penalizaciones por proximidad/colisión y
+el cruce de `GOAL_Y` siguen **activos y sin cambios** en `race_env`.
+
+**Pin visual de pie (aproximación).** Cada tick se comanda la pose de pie a los
+motores, se llama a `resetPhysics()` y la escritura de `translation` fija la
+altura del torso a `KINEMATIC_STAND_Z` (`0.24`, z nominal de pie) con rotación
+de **yaw puro** sobre z (sin roll/pitch), para que el robot se deslice DE PIE en
+vez de acostado. Es una **aproximación visual**: como aquí no hay runtime de
+Webots, el usuario debe **verificar en Webots** que (1) la velocidad es ~1 m/s
+con `LOCO_CMD=forward`; (2) el robot se detiene al llegar a una valla y puede
+girar para esquivarla; (3) el torso se mantiene a `z ~ 0.24` sin acostarse;
+(4) `is_fallen()` sigue `False`.
+
+**Tunables del modo kinematic** (todos en `config.py`, fuente única):
 
 | Constante | Qué controla |
 |-----------|--------------|
-| `KINEMATIC_LINEAR_STEP` | Metros que avanza por tick de `walk_forward` (a lo largo del heading). |
-| `KINEMATIC_ANGULAR_STEP` | Radianes que rota por tick de `turn_left`/`turn_right`. |
+| `KINEMATIC_LINEAR_STEP` | Metros que avanza por tick de `walk_forward` (0.016 → 1.0 m/s a 16 ms). |
+| `KINEMATIC_ANGULAR_STEP` | Radianes que rota por tick de `turn_left`/`turn_right` (0.04 → ~143 °/s). |
+| `KINEMATIC_COLLISION_RADIUS` | Radio (0.3 m) dentro del cual una valla/robot delante bloquea el avance. |
+| `KINEMATIC_STAND_Z` | Altura (0.24 m) a la que se fija el torso (pin visual de pie). |
 
 En Plan B el robot avanza por `KINEMATIC_LINEAR_STEP` a lo largo de su heading
-(heading 0 mira a +y; avance `= (-sin θ·d, +cos θ·d, 0)`) y gira `±
-KINEMATIC_ANGULAR_STEP` en z; cada paso se comanda la pose de pie a los motores
-y se reinicia la física del nodo (`resetPhysics`) para que no acumule caída ni
-deriva. En este modo la **caída está DESACTIVADA** (`is_fallen()` devuelve
-siempre `False`), pero las **penalizaciones por proximidad/colisión** y el
-**cruce de `GOAL_Y`** (victoria) siguen contando exactamente igual que en Plan A.
+(heading 0 mira a +y; avance `= (-sin θ·d, +cos θ·d)`, con `z` fija a
+`KINEMATIC_STAND_Z`) y gira `± KINEMATIC_ANGULAR_STEP` en z. La **caída está
+DESACTIVADA** (`is_fallen()` devuelve siempre `False`), pero las
+**penalizaciones por proximidad/colisión** y el **cruce de `GOAL_Y`** (victoria)
+siguen contando exactamente igual que en Plan A.
 
-Para probar un robot aislado en modo arrastre (opt-in), antepón
-`LOCOMOTION_MODE=kinematic` al lanzar `locomotion_test` (ver más abajo) y observa
-en la consola cómo cambian posición y heading.
+Para probar un robot aislado en modo arrastre (por defecto), lanza
+`locomotion_test` (ver más abajo) y observa en la consola cómo cambian posición
+y heading; para forzar el gait físico antepón `LOCOMOTION_MODE=gait`.
 
 ---
 
@@ -234,17 +266,21 @@ LOCO_CMD=forward webots pista_atletismo_50m.wbt
 
 (Opcional: `LOCO_ROBOT` elige el robot por nombre, por defecto `DQN`.)
 
-**Probar el modo kinematic (Plan B, opt-in) en un robot aislado.** Antepón
-explícitamente `LOCOMOTION_MODE=kinematic` (no es el modo por defecto) para
-arrastrar al robot de pie y ver cómo cambian posición y heading en la consola:
+**Probar el modo kinematic (Plan B, por defecto) en un robot aislado.** Sin
+variables extra, `locomotion_test` ya corre en kinematic (modo por defecto) y
+arrastra al robot de pie; para forzar el gait físico (Plan A) antepón
+`LOCOMOTION_MODE=gait`:
 
 ```bash
-LOCOMOTION_MODE=kinematic LOCO_CMD=forward webots pista_atletismo_50m.wbt
+LOCO_CMD=forward webots pista_atletismo_50m.wbt                 # kinematic (por defecto)
+LOCOMOTION_MODE=gait LOCO_CMD=forward webots pista_atletismo_50m.wbt  # gait físico (opt-in)
 ```
 
 `locomotion_test` imprime al arrancar el modo resuelto (`modo=gait|kinematic`).
 En kinematic no hay que ajustar la marcha física y `is_fallen()` siempre es
-`False`; el robot avanza/gira por `KINEMATIC_LINEAR_STEP`/`KINEMATIC_ANGULAR_STEP`.
+`False`; el robot avanza por `KINEMATIC_LINEAR_STEP` (~1 m/s a 16 ms), gira por
+`KINEMATIC_ANGULAR_STEP`, y **se detiene** ante vallas/robots (bloqueo de
+colisión, ver arriba), pudiendo girar para esquivarlos.
 
 **Modo diagnóstico:** al arrancar, el controlador imprime los **límites reales
 (min/max) de los 20 motores** (una línea por motor) y, tras la estabilización,

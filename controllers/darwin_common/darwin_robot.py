@@ -26,6 +26,67 @@ except ImportError:  # pragma: no cover - ruta usada bajo pythonpath plano
     import config
 
 
+def _iter_world_nodes(supervisor):
+    """Itera los nodos hijos de la raíz de la escena del supervisor.
+
+    Compartido por DarwinRobot (find_others/find_barriers) y por
+    _LocomotionBackend (bloqueo de colisión cinemático), de modo que ambos
+    escanean la escena de la MISMA forma. Defensivo: si falta la raíz o los
+    hijos, no itera nada.
+    """
+    get_root = getattr(supervisor, "getRoot", None)
+    if get_root is None:
+        return
+    root = get_root()
+    if root is None:
+        return
+    try:
+        children = root.getField("children")
+        count = children.getCount()
+    except Exception:
+        return
+    for i in range(count):
+        try:
+            node = children.getMFNode(i)
+        except Exception:
+            node = None
+        if node is None:
+            continue
+        yield node
+
+
+def _node_name(node) -> Optional[str]:
+    """Nombre de un nodo de escena (getNameString o campo 'name'). None si falla."""
+    getter = getattr(node, "getNameString", None)
+    if getter is not None:
+        try:
+            return getter()
+        except Exception:
+            pass
+    try:
+        name_field = node.getField("name")
+    except Exception:
+        return None
+    if name_field is None:
+        return None
+    try:
+        return name_field.getSFString()
+    except Exception:
+        value = getattr(name_field, "_value", None)
+        if isinstance(value, (list, tuple)) and value:
+            return value[0]
+    return None
+
+
+def _node_xy(node) -> Optional[Tuple[float, float]]:
+    """(x, y) del campo translation de un nodo. None si no se puede leer."""
+    try:
+        trans = node.getField("translation").getSFVec3f()
+    except Exception:
+        return None
+    return float(trans[0]), float(trans[1])
+
+
 def _clamp_to_limits(limits: Optional[Tuple[float, float]], angle: float) -> float:
     """Recorta `angle` a [min+margen, max-margen] de `limits` (o lo deja igual).
 
@@ -247,10 +308,21 @@ class _LocomotionBackend:
     # para que update() la traduzca a un arrastre por campos del Supervisor. Las
     # líneas de gait (set_amplitudes + _queue) quedan INTACTAS en ambos modos.
     def walk_forward(self) -> None:
+        # Las líneas del gait (set_amplitudes) quedan INTACTAS en ambos modos.
         self.engine.set_amplitudes(config.GAIT_X_AMPLITUDE, 0.0)
-        _queue(self.supervisor, "walk_forward")
+        # En modo kinematic, BLOQUEAR el avance si el destino penetraría una
+        # valla u otro robot: no se encola la acción (ni el mock ni el camino
+        # real la aplican) y _kin_action queda en None para este tick, de modo
+        # que el robot no atraviesa el obstáculo. El giro nunca se bloquea, así
+        # el agente puede reorientarse y esquivar. En modo gait no hay bloqueo.
         if self.mode == "kinematic":
+            if self._kinematic_blocked_forward():
+                self._kin_action = None
+                return
+            _queue(self.supervisor, "walk_forward")
             self._kin_action = "walk_forward"
+            return
+        _queue(self.supervisor, "walk_forward")
 
     def turn_left(self) -> None:
         self.engine.set_amplitudes(0.0, config.GAIT_A_AMPLITUDE)
@@ -298,9 +370,14 @@ class _LocomotionBackend:
         `_apply_kinematics` con la MISMA convención de signos/ejes, así que si
         también escribiéramos aquí el desplazamiento se aplicaría DOS veces).
         La convención coincide con la del mock (tests/conftest.py):
-        heading 0 mira a +y; avance = (-sin(theta)*d, +cos(theta)*d, 0);
+        heading 0 mira a +y; avance = (-sin(theta)*d, +cos(theta)*d);
         girar suma +/- el paso angular al ángulo de rotación en z;
         theta = rot[3] si rot[2] >= 0, si no -rot[3].
+
+        Pin visual de pie (aproximación): al avanzar, la z se fija a
+        config.KINEMATIC_STAND_Z (no se hereda la z colapsada) y la rotación se
+        mantiene como yaw puro sobre z (roll/pitch = 0). El usuario debe
+        verificar en Webots que el torso no se acuesta a esa z.
         """
         if action is None:
             return
@@ -320,10 +397,17 @@ class _LocomotionBackend:
             theta = rot[3] if rot[2] >= 0 else -rot[3]
             if action == "walk_forward":
                 d = config.KINEMATIC_LINEAR_STEP
-                x, y, z = trans_field.getSFVec3f()
+                x, y, _z = trans_field.getSFVec3f()
                 x += -math.sin(theta) * d
                 y += math.cos(theta) * d
-                trans_field.setSFVec3f([float(x), float(y), float(z)])
+                # Pin visual de pie: fija z a KINEMATIC_STAND_Z en vez de heredar
+                # la z (posiblemente colapsada), para que el robot se deslice DE
+                # PIE. Es una APROXIMACIÓN visual: la rotación ya es yaw puro
+                # ([0,0,1,theta], sin roll/pitch) y no se toca aquí. El usuario
+                # debe verificar en Webots que el torso no se acuesta.
+                trans_field.setSFVec3f(
+                    [float(x), float(y), float(config.KINEMATIC_STAND_Z)]
+                )
             elif action == "turn_left":
                 theta += config.KINEMATIC_ANGULAR_STEP
                 rot_field.setSFRotation([0.0, 0.0, 1.0, float(theta)])
@@ -332,6 +416,83 @@ class _LocomotionBackend:
                 rot_field.setSFRotation([0.0, 0.0, 1.0, float(theta)])
         except Exception:
             pass
+
+    def _self_xy_theta(self) -> Optional[Tuple[float, float, float]]:
+        """(x, y, theta) del nodo propio, con la MISMA convención de heading que
+        _apply_kinematic_motion (theta = rot[3] si rot[2] >= 0, si no -rot[3]).
+
+        Devuelve None si no hay nodo propio resoluble (p.ej. robot no Supervisor),
+        de modo que el bloqueo se desactive de forma segura en ese caso.
+        """
+        get_self = getattr(self.supervisor, "getSelf", None)
+        if get_self is None:
+            return None
+        try:
+            node = get_self()
+        except Exception:
+            return None
+        if node is None:
+            return None
+        try:
+            x, y, _z = node.getField("translation").getSFVec3f()
+            rot = node.getField("rotation").getSFRotation()
+        except Exception:
+            return None
+        theta = rot[3] if rot[2] >= 0 else -rot[3]
+        return float(x), float(y), float(theta)
+
+    def _obstacles_xy(self):
+        """(x, y) de las vallas y de los OTROS robots (excluye el nodo propio).
+
+        Escanea la escena con los mismos helpers que DarwinRobot.find_barriers /
+        find_others, para que el bloqueo use exactamente la misma fuente. El nodo
+        propio se excluye por identidad (no por nombre) para no auto-bloquearse.
+        """
+        get_self = getattr(self.supervisor, "getSelf", None)
+        self_node = None
+        if get_self is not None:
+            try:
+                self_node = get_self()
+            except Exception:
+                self_node = None
+        robot_names = set(config.START_POSITIONS.keys())
+        points = []
+        for node in _iter_world_nodes(self.supervisor):
+            if self_node is not None and node is self_node:
+                continue
+            name = _node_name(node)
+            if name is None:
+                continue
+            is_barrier = name.startswith("valla")
+            is_other_robot = name in robot_names
+            if not (is_barrier or is_other_robot):
+                continue
+            xy = _node_xy(node)
+            if xy is not None:
+                points.append(xy)
+        return points
+
+    def _kinematic_blocked_forward(self) -> bool:
+        """True si un paso de walk_forward penetraría una valla u otro robot.
+
+        Calcula el destino con la MISMA fórmula de avance del camino cinemático
+        (-sin(theta)*d, +cos(theta)*d) y devuelve True si ese destino cae dentro
+        de KINEMATIC_COLLISION_RADIUS de algún obstáculo. El giro NO se consulta
+        aquí (nunca se bloquea), así el agente puede reorientarse y esquivar.
+        Defensivo: si no hay nodo propio o la escena no se puede leer, no bloquea.
+        """
+        pose = self._self_xy_theta()
+        if pose is None:
+            return False
+        x, y, theta = pose
+        d = config.KINEMATIC_LINEAR_STEP
+        nx = x - math.sin(theta) * d
+        ny = y + math.cos(theta) * d
+        radius = config.KINEMATIC_COLLISION_RADIUS
+        for (bx, by) in self._obstacles_xy():
+            if math.hypot(nx - bx, ny - by) < radius:
+                return True
+        return False
 
     def update(self) -> None:
         """Un paso de locomoción. En gait (Plan A) avanza la fase y comanda los
@@ -605,56 +766,15 @@ class DarwinRobot:
         self.stabilize()
 
     # --- escena -------------------------------------------------------------
-    def _iter_world_nodes(self):
-        root = self.backend.getRoot()
-        children = root.getField("children")
-        count = children.getCount()
-        for i in range(count):
-            node = children.getMFNode(i)
-            if node is None:
-                continue
-            yield node
-
-    @staticmethod
-    def _node_name(node) -> Optional[str]:
-        getter = getattr(node, "getNameString", None)
-        if getter is not None:
-            try:
-                return getter()
-            except Exception:
-                pass
-        name_field = None
-        try:
-            name_field = node.getField("name")
-        except Exception:
-            return None
-        if name_field is None:
-            return None
-        try:
-            value = name_field.getSFString()
-        except Exception:
-            value = getattr(name_field, "_value", None)
-            if isinstance(value, (list, tuple)) and value:
-                value = value[0]
-        return value
-
-    @staticmethod
-    def _node_xy(node) -> Optional[Tuple[float, float]]:
-        try:
-            trans = node.getField("translation").getSFVec3f()
-        except Exception:
-            return None
-        return float(trans[0]), float(trans[1])
-
     def find_others(self) -> Dict[str, Tuple[float, float]]:
         """Otros robots por nombre (excluye self). Nunca usa getFromDef."""
         robot_names = set(config.START_POSITIONS.keys())
         others: Dict[str, Tuple[float, float]] = {}
-        for node in self._iter_world_nodes():
-            name = self._node_name(node)
+        for node in _iter_world_nodes(self.backend):
+            name = _node_name(node)
             if name is None or name == self.name or name not in robot_names:
                 continue
-            xy = self._node_xy(node)
+            xy = _node_xy(node)
             if xy is not None:
                 others[name] = xy
         return others
@@ -662,11 +782,11 @@ class DarwinRobot:
     def find_barriers(self) -> Dict[str, Tuple[float, float]]:
         """Vallas/obstáculos por nombre (los nodos cuyo nombre empieza por 'valla')."""
         barriers: Dict[str, Tuple[float, float]] = {}
-        for node in self._iter_world_nodes():
-            name = self._node_name(node)
+        for node in _iter_world_nodes(self.backend):
+            name = _node_name(node)
             if name is None or not name.startswith("valla"):
                 continue
-            xy = self._node_xy(node)
+            xy = _node_xy(node)
             if xy is not None:
                 barriers[name] = xy
         return barriers

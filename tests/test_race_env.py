@@ -56,8 +56,12 @@ def test_forward_progress_is_positive(fake_webots):
 
 
 def test_crossing_goal_grants_bonus_and_terminates(fake_webots):
-    # Meta baja para cruzarla en un paso.
-    env, _ = _make_env(fake_webots, "ppo", goal_y=7.9)
+    # Meta justo por debajo del destino de un paso para cruzarla en un tick.
+    # Se deriva del paso cinemático real (config.KINEMATIC_LINEAR_STEP, fuente
+    # única de la velocidad) en vez de un literal, para no romperse al afinar la
+    # velocidad: ppo arranca en y=7.88 y avanza +KINEMATIC_LINEAR_STEP en +y.
+    goal_y = 7.88 + config.KINEMATIC_LINEAR_STEP / 2.0
+    env, _ = _make_env(fake_webots, "ppo", goal_y=goal_y)
     env.reset()
     obs, reward, terminated, truncated, info = env.step(0)
     assert info["success"] is True

@@ -53,8 +53,20 @@ def test_run_race_until_winner_on_mock(fake_webots):
 def test_run_race_until_winner_progresses(fake_webots):
     # Un robot que arranca antes de la meta debe cruzarla avanzando recto.
     backend = fake_webots.make_supervisor(self_name="actor - critic")
-    robots = {"actor - critic": DarwinRobot(backend, "actor - critic")}
-    # Desde y=6.04 con WALK_DELTA=0.25, hacen falta ~12 pasos para llegar a y=9.
-    result = race.run_race_until_winner(robots, max_steps=50, goal_y=9.0)
+    robot = DarwinRobot(backend, "actor - critic")
+    # Reubicarlo a un carril LIBRE (x=5.0): en modo kinematic (por defecto) el
+    # avance se BLOQUEA al penetrar vallas u otros robots, y los demás robots
+    # arrancan en x~0.1-0.2 justo en su columna. A x=5.0 no hay vallas
+    # (x~-0.9 y x~10-16) ni robots delante, así que puede avanzar recto.
+    start_y = 6.04
+    robot.reset_pose(5.0, start_y)
+    robots = {"actor - critic": robot}
+    # Desde y=6.04 hasta y=9.0 (2.96 m) al paso cinemático real
+    # (config.KINEMATIC_LINEAR_STEP, fuente única de la velocidad) hacen falta
+    # ~2.96 / KINEMATIC_LINEAR_STEP pasos. Se deriva max_steps de la constante
+    # (con margen) para no romperse al afinar la velocidad.
+    needed = (9.0 - start_y) / config.KINEMATIC_LINEAR_STEP
+    max_steps = int(needed * 1.5) + 5
+    result = race.run_race_until_winner(robots, max_steps=max_steps, goal_y=9.0)
     assert result["winner"] == "actor - critic"
-    assert result["steps"] <= 50
+    assert result["steps"] <= max_steps

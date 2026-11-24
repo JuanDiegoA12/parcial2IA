@@ -32,8 +32,12 @@ import config  # límites articulares de fallback para FakeMotor (pythonpath en 
 _DEFAULT_MOTOR_LIMITS = (-3.14, 3.14)
 
 # Paso cinemático de juguete por acción (en unidades del mundo / radianes).
-WALK_DELTA = 0.25   # metros por walk_forward
-TURN_DELTA = 0.20   # radianes por turn_left/turn_right
+# ACOPLADOS a config: la velocidad del arrastre cinemático se afina en UN solo
+# lugar (config.KINEMATIC_LINEAR_STEP / KINEMATIC_ANGULAR_STEP), así que el mock
+# se mueve EXACTAMENTE lo mismo que el camino real de Webots. Se conservan los
+# nombres WALK_DELTA/TURN_DELTA por compatibilidad con tests que los referencien.
+WALK_DELTA = config.KINEMATIC_LINEAR_STEP   # metros por walk_forward
+TURN_DELTA = config.KINEMATIC_ANGULAR_STEP  # radianes por turn_left/turn_right
 
 # Posiciones iniciales de los robots (deben coincidir con config/START_POSITIONS).
 _ROBOT_STARTS = {
@@ -295,16 +299,18 @@ class FakeSupervisor:
         node = self._world[self.self_name]
         rot = node.rotation
         theta = rot[3] if rot[2] >= 0 else -rot[3]
+        # Lee las constantes de config en vez de literales: fuente única de la
+        # velocidad (idéntica al camino real de darwin_robot.py).
         if action == "walk_forward":
             x, y, z = node.translation
-            x += -math.sin(theta) * WALK_DELTA
-            y += math.cos(theta) * WALK_DELTA
+            x += -math.sin(theta) * config.KINEMATIC_LINEAR_STEP
+            y += math.cos(theta) * config.KINEMATIC_LINEAR_STEP
             node.set_translation([x, y, z])
         elif action == "turn_left":
-            theta += TURN_DELTA
+            theta += config.KINEMATIC_ANGULAR_STEP
             node.set_rotation([0.0, 0.0, 1.0, theta])
         elif action == "turn_right":
-            theta -= TURN_DELTA
+            theta -= config.KINEMATIC_ANGULAR_STEP
             node.set_rotation([0.0, 0.0, 1.0, theta])
 
 

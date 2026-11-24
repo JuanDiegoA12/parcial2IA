@@ -1,0 +1,8 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    "Real-path field writes untested under mock: the x,y/theta writes in _apply_kinematic_motion short-circuit under the mock (queue_action guard), so the new per-action tests cover _apply_upright_pose only; the real-Webots walk/turn writes rely on the one pre-existing real-path test. Acceptable by design; the mock cannot catch a regression in that branch.",
+    "Commit scope wider than stated: the commit includes plan.md and verification.md in addition to the four intended files; the verification note described a 4-file commit. No behavioral impact."
+  ],
+  "reviewDoc": "/home/juan/Documentos/parcial2 IA/.agents/tasks/kinematic-upright/semantic-review.md"
+}

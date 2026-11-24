@@ -2,13 +2,14 @@
 
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/traffic/protos/WorkBarrier.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/robotis/darwin-op/protos/Darwin-op.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/balls/protos/Ball.proto"
 
 WorldInfo {
   basicTimeStep 16
 }
 Viewpoint {
-  orientation -0.16444845639147135 -0.04908048157201784 0.9851638500874468 3.7135462025100896
-  position 2.746034624791033 13.25759756174696 1.0355478932019904
+  orientation -0.3336763591504778 -0.21298650599364985 0.9183119489632585 4.201964288555043
+  position 21.1184614772629 33.81461836932702 23.24874268862967
   followType "None"
 }
 Background {
@@ -58,12 +59,41 @@ DEF DARWIN Darwin-op {
   supervisor TRUE
   selfCollision TRUE
 }
+Ball {
+  translation 8.79 7.98 0.0625
+  name "checkpoint1"
+}
+Ball {
+  translation 8.79 -7.96 0.0625
+  name "checkpoint3"
+}
+Ball {
+  translation 1.46 -8.97 0.0625
+  name "checkpoint4"
+}
+Ball {
+  translation -8.5 -8.25 0.0625
+  name "checkpoint5"
+}
+Ball {
+  translation -8.5 8.21 0.0625
+  name "checkpoint7"
+}
+Ball {
+  translation 13.51 1.49 0.0625
+  name "checkpoint2"
+}
+Ball {
+  translation -13.48 1.49 0.0625
+  name "checkpoint6"
+}
 Darwin-op {
+  hidden rotation_10 0.5774169397748302 0.57731693100959 0.5773169310099423 2.0943999941685596
   translation 0.19 11.44 0.247
   name "arodillado"
   controller "locomotion_test"
   controllerArgs [
-    "left"
+    "forward"
   ]
   supervisor TRUE
 }

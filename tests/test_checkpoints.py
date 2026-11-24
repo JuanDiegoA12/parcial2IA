@@ -100,6 +100,41 @@ def test_current_segment_uses_predecessor():
     assert seg[1] == pytest.approx(targets[1])
 
 
+def test_finish_point_is_cp0():
+    targets = _ordered_targets()
+    tracker = CheckpointTracker(targets, radius=1.0)
+    # cp0 (cierre de vuelta) es el último objetivo del orden canónico.
+    assert tracker.finish_point() == pytest.approx((0.0, config.GOAL_Y))
+
+
+# --- Integración: observación y penalización off-track en el entorno --------
+
+def test_obs_lap_progress_and_dist_to_finish_are_distinct(fake_webots):
+    """obs[3] (lap_progress) y obs[4] (dist_to_finish) NO son idénticos.
+
+    En la pose de arranque lap_progress=0 (ningún checkpoint alcanzado) pero la
+    distancia normalizada al cierre de vuelta (cp0) es >0 porque el robot no
+    arranca exactamente sobre cp0; por tanto ambas señales difieren.
+    """
+    import os
+    os.environ["LOCOMOTION_MODE"] = "kinematic"
+    try:
+        supervisor = fake_webots.make_supervisor(self_name="ppo")
+        env = DarwinRaceEnv(supervisor, robot_name="ppo")
+        obs, _ = env.reset()
+        assert obs.shape == (7,)
+        # lap_progress en el arranque: ningún objetivo alcanzado todavía.
+        assert obs[3] == pytest.approx(0.0)
+        # dist_to_finish normalizada: estrictamente >0 y != lap_progress.
+        assert obs[4] > 0.0
+        assert obs[4] != pytest.approx(obs[3])
+        # El valor coincide con la distancia a cp0 normalizada por max_dist.
+        expected = env._dist_to_finish() / env.params.max_dist
+        assert obs[4] == pytest.approx(min(expected, 1.0))
+    finally:
+        os.environ.pop("LOCOMOTION_MODE", None)
+
+
 # --- Integración: penalización off-track en el entorno ----------------------
 
 def test_env_off_track_penalty_lowers_reward(fake_webots):

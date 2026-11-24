@@ -8,7 +8,10 @@ completar la secuencia NO gana.
 
 Observación: Box de 7 floats normalizados
     [dist_to_next_cp, angle_to_next_cp, heading, lap_progress,
-     next_cp_index_norm, dist_nearest_obstacle, dist_nearest_other_robot]
+     dist_to_finish, dist_nearest_obstacle, dist_nearest_other_robot]
+donde dist_to_finish = distancia en línea recta a cp0 (cierre de vuelta)
+normalizada por max_dist; es una señal continua distinta de lap_progress
+(escalón discreto reached_count/total).
 Acción: Discrete(3) -> config.ACTION_MAP (0 avanzar, 1 girar izq, 2 girar der).
 
 Recompensa (safe learning):
@@ -131,9 +134,11 @@ class CheckpointTracker:
             return 1.0
         return self.reached_count / len(self.targets)
 
-    def target_ordinal_norm(self) -> float:
-        """Índice normalizado del objetivo actual (igual a lap_progress aquí)."""
-        return self.lap_progress()
+    def finish_point(self) -> Tuple[float, float]:
+        """Coordenadas del cierre de vuelta (cp0), último objetivo del orden."""
+        if self.targets:
+            return self.targets[-1]
+        return self.origin
 
     def update(self, px: float, py: float) -> Dict[str, object]:
         """Procesa una posición (px, py); devuelve el resultado del tick.
@@ -224,7 +229,7 @@ class DarwinRaceEnv(gym.Env):
         )
 
         self.action_space = spaces.Discrete(len(config.ACTION_MAP))
-        # dist_next_cp, angle_next_cp, heading, lap_progress, next_cp_index_norm,
+        # dist_next_cp, angle_next_cp, heading, lap_progress, dist_to_finish,
         # dist_obstacle, dist_other
         high = np.ones(7, dtype=np.float32)
         low = np.array([0.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
@@ -349,6 +354,17 @@ class DarwinRaceEnv(gym.Env):
         tx, ty = self._target_point()
         return math.hypot(px - tx, py - ty)
 
+    def _dist_to_finish(self) -> float:
+        """Distancia en línea recta del robot al cierre de vuelta (cp0).
+
+        Señal continua de "cuánto falta para cerrar la vuelta", distinta del
+        lap_progress (escalón discreto reached_count/total). Referida siempre a
+        cp0 = (0, GOAL_Y) sin importar el objetivo actual.
+        """
+        px, py, _ = self.robot.get_position()
+        fx, fy = self.tracker.finish_point()
+        return math.hypot(px - fx, py - fy)
+
     def _angle_to_target(self) -> float:
         px, py, _ = self.robot.get_position()
         tx, ty = self._target_point()
@@ -381,7 +397,7 @@ class DarwinRaceEnv(gym.Env):
                 max(-1.0, min(angle / math.pi, 1.0)),
                 max(-1.0, min(heading / math.pi, 1.0)),
                 max(0.0, min(self.tracker.lap_progress(), 1.0)),
-                max(0.0, min(self.tracker.target_ordinal_norm(), 1.0)),
+                max(0.0, min(self._dist_to_finish() / max_dist, 1.0)),
                 1.0 if nearest_obstacle is None else min(nearest_obstacle / max_dist, 1.0),
                 1.0 if nearest_other is None else min(nearest_other / max_dist, 1.0),
             ],

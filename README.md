@@ -462,7 +462,7 @@ La solución es una **vuelta de CHECKPOINTS ORDENADOS**: el robot debe alcanzar
 | 1 | ángulo al siguiente checkpoint | `clip(ángulo / π, -1, 1)` |
 | 2 | heading del robot | `clip(heading / π, -1, 1)` |
 | 3 | progreso de la vuelta | `reached_count / TOTAL_TARGETS` ∈ [0, 1] |
-| 4 | índice normalizado del siguiente checkpoint | `target_ordinal / TOTAL_TARGETS` ∈ [0, 1] |
+| 4 | distancia al cierre de vuelta (cp0) | `min(dist_a_cp0 / max_dist, 1)` ∈ [0, 1] |
 | 5 | distancia al obstáculo más cercano | `1` si ninguno, si no `min(dist / max_dist, 1)` |
 | 6 | distancia al robot más cercano | `1` si ninguno, si no `min(dist / max_dist, 1)` |
 

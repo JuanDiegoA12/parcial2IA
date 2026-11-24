@@ -9,6 +9,7 @@ tamaño del espacio, la posición inicial y la meta en los experimentos.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field, replace
 from typing import Dict, Tuple
 
@@ -58,8 +59,17 @@ ACCEL_CENTER: float = 512.0           # lectura nominal por eje de pie. AJUSTABL
 ACCEL_FALL_TOLERANCE: float = 80.0    # banda tolerada antes de declarar caída. AJUSTABLE
 
 # Altura (z, m) del torso por debajo de la cual el robot se considera caído.
-# De pie el DARwIn-OP ronda z~0.24-0.34 según el .wbt; si colapsa cae bajo esto.
-FALL_HEIGHT_Z: float = 0.18           # AJUSTABLE en Webots segun la pose real
+# De pie el DARwIn-OP ronda z~0.23-0.25 (nominal confirmado z~0.247); colapsado
+# cae a ~0.075. FALL_HEIGHT_Z va claramente por debajo de la pose de pie y por
+# encima del colapso, de modo que de pie/en cuclillas NO cuenta como caída pero
+# el colapso sí. Es la señal PRIMARIA de caída. AJUSTABLE en Webots.
+FALL_HEIGHT_Z: float = 0.14           # AJUSTABLE en Webots segun la pose real
+
+# Persistencia del acelerómetro antes de declarar caída, al estilo del
+# controlador oficial Walk.cpp: una lectura puntual fuera de banda NO basta;
+# hacen falta FALL_ACCEL_PERSIST_STEPS ticks consecutivos fuera de banda. Evita
+# que un pico de ruido del acelerómetro marque fallen=True. AJUSTABLE.
+FALL_ACCEL_PERSIST_STEPS: int = 100
 
 # --- Episodio ---------------------------------------------------------------
 
@@ -80,17 +90,31 @@ MOTOR_NAMES = (
 )
 
 # Pose nominal estable de pie (motor -> ángulo en rad). Brazos ligeramente
-# separados, piernas flexionadas en cadera/rodilla/tobillo para bajar el centro
-# de masa. Es el punto de reposo sobre el que oscila el gait. AJUSTABLE.
+# separados; piernas en una flexión MODESTA de cadera/rodilla/tobillo (cuclillas
+# suave) para bajar el centro de masa y estabilizar — el usuario confirmó que el
+# robot sólo se sostiene flexionado, nunca totalmente erguido. Es el punto de
+# reposo sobre el que oscila el gait.
+#
+# IMPORTANTE (modelo Darwin-op de Webots): las articulaciones de pierna/brazo
+# están ESPEJADAS con rangos de signo invertido entre izquierda y derecha (ver
+# JOINT_LIMITS). Por eso la flexión de la rodilla derecha es POSITIVA
+# (LegLowerR en [-0.02, 2.25]) y la izquierda NEGATIVA (LegLowerL en
+# [-2.25, 0.03]); la cadera derecha es NEGATIVA (LegUpperR en [-1.77, 0.45]) y
+# la izquierda POSITIVA (LegUpperL en [-0.5, 1.68]).
+#
+# TODOS estos valores son PUNTOS DE PARTIDA para AJUSTAR en Webots: ejecuta
+# locomotion_test con LOCO_CMD=stand, observa la z resuelta (~0.23-0.25) y el
+# equilibrio, y retoca cadera/rodilla/tobillo. Cada valor queda al menos
+# JOINT_LIMIT_MARGIN dentro de su rango REAL para que el recorte nunca dispare.
 STANDING_POSE: Dict[str, float] = {
     "ShoulderR": 0.8, "ShoulderL": -0.8,
-    "ArmUpperR": 0.5, "ArmUpperL": -0.5,
+    "ArmUpperR": 0.4, "ArmUpperL": -0.4,
     "ArmLowerR": -0.6, "ArmLowerL": 0.6,
     "PelvYR": 0.0, "PelvYL": 0.0,
     "PelvR": 0.0, "PelvL": 0.0,
-    "LegUpperR": 0.5, "LegUpperL": -0.5,
-    "LegLowerR": 1.0, "LegLowerL": -1.0,
-    "AnkleR": -0.5, "AnkleL": 0.5,
+    "LegUpperR": -0.6, "LegUpperL": 0.6,    # cadera: R neg, L pos (espejo)
+    "LegLowerR": 1.2, "LegLowerL": -1.2,    # rodilla: R pos, L neg (espejo)
+    "AnkleR": -0.6, "AnkleL": 0.6,          # tobillo: R neg, L pos (espejo)
     "FootR": 0.0, "FootL": 0.0,
     "Neck": 0.0, "Head": 0.0,
 }
@@ -120,22 +144,30 @@ GAIT_LEG_PHASE_OFFSET: float = math.pi
 # Velocidad por defecto de los motores (rad/s) al accionarlos. AJUSTABLE.
 MOTOR_VELOCITY: float = 8.0
 
-# Límites articulares (motor -> (min, max) en rad). La rodilla LegLowerR/L es
-# fija en [-2.25, 2.25] (dato del enunciado/modelo). El resto son rangos
-# conservadores y seguros: NO se consultó el PROTO Darwin-op.proto en el
-# sandbox (sin red), así que se asumen amplios pero prudentes. Ajustar si se
-# observa recorte excesivo contra los límites reales del PROTO. ASUNCIÓN.
+# Límites articulares (motor -> (min, max) en rad). Son un FALLBACK: la fuente
+# autoritativa son los límites REALES que _LocomotionBackend lee en runtime con
+# motor.getMinPosition()/getMaxPosition() (ver darwin_robot.py) y que
+# locomotion_test vuelca por consola en su modo diagnóstico. Este fallback se
+# usa cuando esos getters no están disponibles (p.ej. el mock en tests).
+#
+# Valores tomados del PROTO oficial Darwin-op de Webots R2025a
+# (projects/robots/robotis/darwin-op/protos/Darwin-op.proto). Son ASIMÉTRICOS y
+# están ESPEJADOS con el signo invertido entre izquierda y derecha: NO uses el
+# placeholder simétrico (-1.57, 1.57) de antes. En particular LegUpperR tope
+# 0.45 explica la advertencia "LegUpperR 0.5 > 0.45". El PROTO es remoto, así
+# que offline no puede reparsearse; si Webots imprime otros topes, confía en los
+# de runtime. (Contenido reformulado por cumplimiento de licencia.)
 JOINT_LIMITS: Dict[str, Tuple[float, float]] = {
     "ShoulderR": (-3.14, 3.14), "ShoulderL": (-3.14, 3.14),
-    "ArmUpperR": (-3.14, 3.14), "ArmUpperL": (-3.14, 3.14),
-    "ArmLowerR": (-1.57, 1.57), "ArmLowerL": (-1.57, 1.57),
-    "PelvYR": (-1.57, 1.57), "PelvYL": (-1.57, 1.57),
-    "PelvR": (-1.57, 1.57), "PelvL": (-1.57, 1.57),
-    "LegUpperR": (-1.57, 1.57), "LegUpperL": (-1.57, 1.57),
-    "LegLowerR": (-2.25, 2.25), "LegLowerL": (-2.25, 2.25),
-    "AnkleR": (-1.57, 1.57), "AnkleL": (-1.57, 1.57),
-    "FootR": (-1.57, 1.57), "FootL": (-1.57, 1.57),
-    "Neck": (-1.57, 1.57), "Head": (-0.96, 0.96),
+    "ArmUpperR": (-0.68, 2.30), "ArmUpperL": (-2.25, 0.77),
+    "ArmLowerR": (-1.65, 1.16), "ArmLowerL": (-1.18, 1.63),
+    "PelvYR": (-2.42, 0.66), "PelvYL": (-0.69, 2.50),
+    "PelvR": (-1.01, 1.01), "PelvL": (-1.00, 0.93),
+    "LegUpperR": (-1.77, 0.45), "LegUpperL": (-0.50, 1.68),
+    "LegLowerR": (-0.02, 2.25), "LegLowerL": (-2.25, 0.03),
+    "AnkleR": (-1.24, 1.38), "AnkleL": (-1.39, 1.22),
+    "FootR": (-0.68, 1.04), "FootL": (-1.02, 0.60),
+    "Neck": (-1.81, 1.81), "Head": (-0.36, 0.94),
 }
 
 # Margen de seguridad (rad) que NUNCA se consume: todo ángulo se recorta a
@@ -144,8 +176,65 @@ JOINT_LIMITS: Dict[str, Tuple[float, float]] = {
 JOINT_LIMIT_MARGIN: float = 0.05
 
 # Pasos de estabilización: ticks quietos manteniendo la pose de pie antes de
-# empezar cada episodio, para que la física asiente al robot. AJUSTABLE.
-STABILIZATION_STEPS: int = 20
+# empezar cada episodio, para que la física asiente al robot en la pose de
+# cuclillas. Debe ser lo bastante largo para que la pose se asiente antes de
+# iniciar el comando/episodio; súbelo si el robot aún no está quieto al empezar
+# a moverse. AJUSTABLE en Webots.
+STABILIZATION_STEPS: int = 80
+
+# --- Modo de locomoción: Plan A (gait) vs Plan B (cinemático) ---------------
+#
+# El proyecto se centra en la CARRERA y en evaluar agentes de RL (PPO, DQN,
+# A2C y agente propio), NO en caminar. Por eso existen DOS modos de locomoción
+# intercambiables, seleccionables con una sola bandera:
+#
+#   Plan A -- "gait": gait sinusoidal físico que acciona los 20 motores del
+#       DARwIn-OP cada paso (_GaitEngine en darwin_robot.py). Es la locomoción
+#       "de verdad", pero costosa de ajustar y sensible al equilibrio.
+#
+#   Plan B -- "kinematic": arrastre cinemático (tipo "tortuga" diferencial).
+#       El Supervisor desliza al robot DE PIE escribiendo directamente los
+#       campos translation/rotation cada paso (teletransporte por paso), sin
+#       depender del equilibrio de los motores. Es una DECISIÓN DE DISEÑO
+#       deliberada y aceptada: para el objetivo (carrera + evaluación de
+#       agentes) el movimiento es un lujo, no una necesidad, y este modo es
+#       "time-safe" (no hay que ajustar la marcha física). Mantiene las MISMAS
+#       acciones discretas, el MISMO DarwinRaceEnv y los MISMOS agentes.
+#
+# En modo kinematic la caída se desactiva (is_fallen() devuelve False), pero
+# las penalizaciones por proximidad/colisión y el cruce de GOAL_Y siguen
+# contando exactamente igual que en modo gait.
+
+# Modo por defecto: 'kinematic' (Plan B). Sobre-escribible con la variable de
+# entorno LOCOMOTION_MODE. Valores válidos: 'gait' | 'kinematic'.
+LOCOMOTION_MODE: str = "kinematic"
+
+# Paso lineal del arrastre cinemático: metros que avanza el robot por cada tick
+# de walk_forward, a lo largo de su heading. Igual al WALK_DELTA del mock para
+# que la magnitud del movimiento sea idéntica bajo el mock y en Webots real.
+# AJUSTABLE en Webots.
+KINEMATIC_LINEAR_STEP: float = 0.25
+
+# Paso angular del arrastre cinemático: radianes que rota el robot por cada
+# tick de turn_left/turn_right. Igual al TURN_DELTA del mock. AJUSTABLE.
+KINEMATIC_ANGULAR_STEP: float = 0.20
+
+
+def resolve_locomotion_mode() -> str:
+    """Devuelve el modo de locomoción efectivo ('gait' o 'kinematic').
+
+    Prioridad: variable de entorno LOCOMOTION_MODE (si está definida y es
+    válida) sobre la constante de módulo LOCOMOTION_MODE. El valor se
+    normaliza a minúsculas y se valida contra {'gait', 'kinematic'}; cualquier
+    valor no reconocido cae al valor por defecto LOCOMOTION_MODE.
+    """
+    valid = {"gait", "kinematic"}
+    raw = os.environ.get("LOCOMOTION_MODE", LOCOMOTION_MODE)
+    mode = str(raw).strip().lower()
+    if mode not in valid:
+        return LOCOMOTION_MODE
+    return mode
+
 
 # --- Normalización de la observación ----------------------------------------
 

@@ -26,14 +26,14 @@ except ImportError:  # pragma: no cover - ruta usada bajo pythonpath plano
     import config
 
 
-def _clamp_joint(name: str, angle: float) -> float:
-    """Recorta `angle` a [min+margen, max-margen] del motor `name`.
+def _clamp_to_limits(limits: Optional[Tuple[float, float]], angle: float) -> float:
+    """Recorta `angle` a [min+margen, max-margen] de `limits` (o lo deja igual).
 
-    Si el motor no tiene límites declarados se devuelve el ángulo intacto.
-    Nunca se comanda una articulación exactamente a su tope físico: así se
-    evitan las advertencias "too big/low requested position" de Webots.
+    Si `limits` es None el ángulo se devuelve intacto (motor sin límites
+    conocidos). Nunca se comanda una articulación exactamente a su tope físico:
+    así se evitan las advertencias "too big/low requested position" de Webots.
+    Si el margen excede el rango, se devuelve el centro del rango.
     """
-    limits = config.JOINT_LIMITS.get(name)
     if limits is None:
         return float(angle)
     lo, hi = limits
@@ -43,6 +43,16 @@ def _clamp_joint(name: str, angle: float) -> float:
     if lo_safe > hi_safe:  # margen mayor que el rango: usa el centro
         return float((lo + hi) / 2.0)
     return float(max(lo_safe, min(hi_safe, angle)))
+
+
+def _clamp_joint(name: str, angle: float) -> float:
+    """Recorta `angle` contra el fallback de config.JOINT_LIMITS del motor.
+
+    Es el recorte por defecto de nivel módulo que usan `_GaitEngine` y los
+    tests puros de config. En Webots real el recorte autoritativo lo aplica
+    `_LocomotionBackend.clamp`, que usa los límites leídos en runtime.
+    """
+    return _clamp_to_limits(config.JOINT_LIMITS.get(name), angle)
 
 
 class _GaitEngine:
@@ -153,7 +163,16 @@ class _LocomotionBackend:
     def __init__(self, supervisor, config_path: str = ""):
         self.supervisor = supervisor
         self.engine = _GaitEngine()
+        # Modo de locomoción resuelto una sola vez al construir: 'gait' (Plan A,
+        # gait sinusoidal físico) o 'kinematic' (Plan B, arrastre vía Supervisor).
+        self.mode = config.resolve_locomotion_mode()
+        # Acción cinemática pendiente para aplicar en el próximo update() en
+        # modo kinematic (None, 'walk_forward', 'turn_left' o 'turn_right').
+        self._kin_action: Optional[str] = None
         self.motors: Dict[str, object] = {}
+        # Límites REALES por motor leídos en runtime (ver _fetch_motors). Fuente
+        # autoritativa del recorte en Webots; vacío bajo el mock sin motores.
+        self.motor_limits: Dict[str, Tuple[float, float]] = {}
         self._fetch_motors()
         # available = hay motores reales que accionar (Webots). Si ninguno
         # resolvió, operamos en modo no-op (mock sin motores) sin romper tests.
@@ -187,27 +206,78 @@ class _LocomotionBackend:
                 except Exception:
                     pass
             self.motors[name] = motor
+            # Leer los límites REALES del motor en runtime. Si el motor no
+            # expone los getters (p.ej. mock antiguo), caer al fallback de
+            # config.JOINT_LIMITS; si tampoco está, dejar el motor sin límites.
+            self.motor_limits[name] = self._read_motor_limits(name, motor)
+
+    @staticmethod
+    def _read_motor_limits(name: str, motor) -> Optional[Tuple[float, float]]:
+        """Lee (min, max) reales del motor, con fallback a config.JOINT_LIMITS.
+
+        Guardado defensivamente: el mock puede carecer de
+        getMinPosition/getMaxPosition. Devuelve None si no hay ningún límite
+        conocido (motor sin cota).
+        """
+        lo = hi = None
+        get_min = getattr(motor, "getMinPosition", None)
+        get_max = getattr(motor, "getMaxPosition", None)
+        if callable(get_min) and callable(get_max):
+            try:
+                lo = float(get_min())
+                hi = float(get_max())
+            except Exception:
+                lo = hi = None
+        if lo is None or hi is None or lo >= hi:
+            return config.JOINT_LIMITS.get(name)
+        return (lo, hi)
+
+    def clamp(self, name: str, angle: float) -> float:
+        """Recorta `angle` contra los límites REALES del motor (o el fallback).
+
+        Usa los límites leídos en runtime en `self.motor_limits`; si el nombre
+        no está, cae al recorte de nivel módulo contra config.JOINT_LIMITS.
+        """
+        if name in self.motor_limits:
+            return _clamp_to_limits(self.motor_limits[name], angle)
+        return _clamp_joint(name, angle)
 
     # --- acciones: fijan las amplitudes de comando del gait -----------------
+    # En modo kinematic además se registra la acción pendiente en _kin_action
+    # para que update() la traduzca a un arrastre por campos del Supervisor. Las
+    # líneas de gait (set_amplitudes + _queue) quedan INTACTAS en ambos modos.
     def walk_forward(self) -> None:
         self.engine.set_amplitudes(config.GAIT_X_AMPLITUDE, 0.0)
         _queue(self.supervisor, "walk_forward")
+        if self.mode == "kinematic":
+            self._kin_action = "walk_forward"
 
     def turn_left(self) -> None:
         self.engine.set_amplitudes(0.0, config.GAIT_A_AMPLITUDE)
         _queue(self.supervisor, "turn_left")
+        if self.mode == "kinematic":
+            self._kin_action = "turn_left"
 
     def turn_right(self) -> None:
         self.engine.set_amplitudes(0.0, -config.GAIT_A_AMPLITUDE)
         _queue(self.supervisor, "turn_right")
+        if self.mode == "kinematic":
+            self._kin_action = "turn_right"
 
     def stand(self) -> None:
         self.engine.set_amplitudes(0.0, 0.0)
         _queue(self.supervisor, None)
+        if self.mode == "kinematic":
+            self._kin_action = None
 
     # --- accionamiento de motores ------------------------------------------
     def apply_targets(self, targets: Dict[str, float]) -> None:
-        """Comanda setPosition a cada motor resuelto con los ángulos dados."""
+        """Comanda setPosition a cada motor resuelto con los ángulos dados.
+
+        Cada ángulo pasa por `self.clamp` como guarda final contra los límites
+        REALES del motor (leídos en runtime), de modo que en Webots ganan los
+        topes verdaderos y nunca se emite "too big/low requested position".
+        """
         for name, motor in self.motors.items():
             angle = targets.get(name)
             if angle is None:
@@ -216,14 +286,86 @@ class _LocomotionBackend:
             if set_pos is None:
                 continue
             try:
-                set_pos(float(angle))
+                set_pos(self.clamp(name, float(angle)))
             except Exception:
                 pass
 
+    def _apply_kinematic_motion(self, action: Optional[str]) -> None:
+        """Arrastre cinemático: escribe translation/rotation del nodo propio.
+
+        SÓLO actúa en Webots real, detectado porque el backend NO expone
+        `queue_action` (el mock sí lo expone y ya produce el movimiento vía
+        `_apply_kinematics` con la MISMA convención de signos/ejes, así que si
+        también escribiéramos aquí el desplazamiento se aplicaría DOS veces).
+        La convención coincide con la del mock (tests/conftest.py):
+        heading 0 mira a +y; avance = (-sin(theta)*d, +cos(theta)*d, 0);
+        girar suma +/- el paso angular al ángulo de rotación en z;
+        theta = rot[3] si rot[2] >= 0, si no -rot[3].
+        """
+        if action is None:
+            return
+        # Bajo el mock el movimiento lo produce queue_action + _apply_kinematics.
+        if hasattr(self.supervisor, "queue_action"):
+            return
+        get_self = getattr(self.supervisor, "getSelf", None)
+        if get_self is None:
+            return
+        node = get_self()
+        if node is None:
+            return
+        try:
+            trans_field = node.getField("translation")
+            rot_field = node.getField("rotation")
+            rot = rot_field.getSFRotation()
+            theta = rot[3] if rot[2] >= 0 else -rot[3]
+            if action == "walk_forward":
+                d = config.KINEMATIC_LINEAR_STEP
+                x, y, z = trans_field.getSFVec3f()
+                x += -math.sin(theta) * d
+                y += math.cos(theta) * d
+                trans_field.setSFVec3f([float(x), float(y), float(z)])
+            elif action == "turn_left":
+                theta += config.KINEMATIC_ANGULAR_STEP
+                rot_field.setSFRotation([0.0, 0.0, 1.0, float(theta)])
+            elif action == "turn_right":
+                theta -= config.KINEMATIC_ANGULAR_STEP
+                rot_field.setSFRotation([0.0, 0.0, 1.0, float(theta)])
+        except Exception:
+            pass
+
     def update(self) -> None:
-        """Un paso de gait: avanza la fase y comanda los motores."""
+        """Un paso de locomoción. En gait (Plan A) avanza la fase y comanda los
+        motores; en kinematic (Plan B) mantiene la pose de pie, aplica el
+        arrastre por campos del Supervisor y reinicia la física para no
+        acumular caída/deriva."""
+        if self.mode == "kinematic":
+            # Mantener la pose de pie en los motores (no-op si no hay motores,
+            # p.ej. el mock), arrastrar al robot y reiniciar su física.
+            self.hold_standing()
+            self._apply_kinematic_motion(self._kin_action)
+            self._reset_self_physics()
+            self._kin_action = None
+            return
         self.engine.advance()
         self.apply_targets(self.engine.compute_targets())
+
+    def _reset_self_physics(self) -> None:
+        """Reinicia la física del nodo propio en Webots (no-op bajo el mock).
+
+        Evita que el teletransporte por paso acumule velocidad/caída. Si el
+        nodo no expone resetPhysics (mock), se omite silenciosamente.
+        """
+        get_self = getattr(self.supervisor, "getSelf", None)
+        if get_self is None:
+            return
+        node = get_self()
+        reset_physics = getattr(node, "resetPhysics", None)
+        if reset_physics is None:
+            return
+        try:
+            reset_physics()
+        except Exception:
+            pass
 
     def hold_standing(self) -> None:
         """Comanda la pose de pie sin avanzar la fase (estabilización)."""
@@ -257,6 +399,10 @@ class DarwinRobot:
         self._self_node = backend.getSelf()
         self._accel = self._safe_sensor("getAccelerometer", "Accelerometer")
         self._gyro = self._safe_sensor("getGyro", "Gyro")
+        # Contador de ticks consecutivos con el acelerómetro fuera de banda.
+        # Sólo tras FALL_ACCEL_PERSIST_STEPS seguidos se declara caída por
+        # acelerómetro (persistencia tipo Walk.cpp); un pico aislado se ignora.
+        self._accel_out_of_band = 0
 
     # --- sensores -----------------------------------------------------------
     def _safe_sensor(self, getter_name: str, device_name: str):
@@ -322,17 +468,33 @@ class DarwinRobot:
     def is_fallen(self) -> bool:
         """True si el robot está caído, combinando tres señales independientes.
 
-        (a) Acelerómetro: en Webots el DARwIn-OP lee cada eje centrado en
-            ~ACCEL_CENTER (512) estando de pie. Una desviación mayor que
-            ACCEL_FALL_TOLERANCE indica inclinación/caída.
+        (c) Altura (PRIMARIA): la z del torso por debajo de FALL_HEIGHT_Z indica
+            colapso; es una señal inmediata.
         (b) Orientación del torso vía Supervisor: el ángulo del eje-ángulo del
-            campo 'rotation' por encima de FALL_TILT_THRESHOLD indica vuelco.
-        (c) Altura: la z del torso por debajo de FALL_HEIGHT_Z indica colapso.
+            campo 'rotation' (ignorando el yaw puro en z) por encima de
+            FALL_TILT_THRESHOLD indica vuelco.
+        (a) Acelerómetro: en Webots el DARwIn-OP lee cada eje centrado en
+            ~ACCEL_CENTER (512) estando de pie. La lectura es RUIDOSA, así que
+            una desviación puntual mayor que ACCEL_FALL_TOLERANCE NO basta:
+            hace falta PERSISTENCIA de FALL_ACCEL_PERSIST_STEPS ticks
+            consecutivos fuera de banda (igual que Walk.cpp). Un pico aislado
+            incrementa el contador pero no declara caída; una lectura dentro de
+            banda lo reinicia a 0.
 
         Cada rama se evalúa defensivamente: si falta el sensor o el campo, se
         omite esa señal sin lanzar excepción. Caído = cualquiera de ellas.
+
+        En modo kinematic (Plan B) la caída está DESACTIVADA por diseño: el
+        robot se desliza de pie vía Supervisor y no debe volcar, así que
+        is_fallen() devuelve siempre False (las penalizaciones por
+        proximidad/colisión y el cruce de meta siguen activas en race_env).
         """
-        # (a) Acelerómetro centrado en ~512.
+        if self.locomotion.mode == "kinematic":
+            return False
+
+        # (a) Acelerómetro centrado en ~512 CON PERSISTENCIA. Se evalúa primero
+        # para mantener el contador actualizado cada tick, pero sólo declara
+        # caída tras FALL_ACCEL_PERSIST_STEPS ticks seguidos fuera de banda.
         if self._accel is not None:
             try:
                 values = self._accel.getValues()
@@ -341,7 +503,11 @@ class DarwinRobot:
             if values is not None:
                 deviation = max(abs(float(v) - config.ACCEL_CENTER) for v in values)
                 if deviation > config.ACCEL_FALL_TOLERANCE:
-                    return True
+                    self._accel_out_of_band += 1
+                    if self._accel_out_of_band >= config.FALL_ACCEL_PERSIST_STEPS:
+                        return True
+                else:
+                    self._accel_out_of_band = 0
 
         # (b) Inclinación del torso desde el campo 'rotation' del Supervisor.
         try:
@@ -386,8 +552,11 @@ class DarwinRobot:
         trans_field.setSFVec3f([float(x), float(y), float(new_z)])
         self._self_node.getField("rotation").setSFRotation([0.0, 0.0, 1.0, 0.0])
 
-        # Pose de pie + fase de gait a cero.
+        # Pose de pie + fase de gait a cero. También se limpia cualquier acción
+        # cinemática pendiente para que el modo kinematic arranque el episodio
+        # sin arrastre residual.
         self.locomotion.engine.reset_phase()
+        self.locomotion._kin_action = None
         self.locomotion.hold_standing()
 
         # Reinicio de la física del nodo propio (solo Webots real).

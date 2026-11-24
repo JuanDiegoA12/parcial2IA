@@ -1,6 +1,7 @@
 """Tests de DarwinRobot contra el backend mock (fake_webots)."""
 
 import math
+import os
 
 import pytest
 
@@ -8,7 +9,30 @@ import config
 from darwin_robot import DarwinRobot, _GaitEngine, _clamp_joint
 
 
-def _make_robot(fake_webots, name="DQN"):
+@pytest.fixture(autouse=True)
+def _restore_locomotion_mode():
+    """Restaura la variable de entorno LOCOMOTION_MODE tras cada test.
+
+    Algunos tests fijan el modo ('gait') antes de construir el robot; este
+    fixture evita que esa selección se filtre a otros tests.
+    """
+    saved = os.environ.get("LOCOMOTION_MODE")
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("LOCOMOTION_MODE", None)
+        else:
+            os.environ["LOCOMOTION_MODE"] = saved
+
+
+def _make_robot(fake_webots, name="DQN", mode=None):
+    # El modo de locomoción se resuelve al CONSTRUIR el robot, así que si un
+    # test necesita un modo concreto (p.ej. 'gait' para las señales de caída y
+    # el avance de fase del gait, que el modo kinematic por diseño desactiva)
+    # debe fijar LOCOMOTION_MODE antes de instanciar DarwinRobot.
+    if mode is not None:
+        os.environ["LOCOMOTION_MODE"] = mode
     supervisor = fake_webots.make_supervisor(self_name=name)
     return DarwinRobot(supervisor, name), supervisor
 
@@ -51,7 +75,9 @@ def test_reset_pose_sets_translation(fake_webots):
 
 
 def test_is_fallen_threshold(fake_webots):
-    robot, supervisor = _make_robot(fake_webots, "DQN")
+    # La detección de caída es una señal de Plan A (gait); kinematic la
+    # desactiva por diseño, así que este test se ejecuta en modo gait.
+    robot, supervisor = _make_robot(fake_webots, "DQN", mode="gait")
     assert robot.is_fallen() is False
     supervisor.force_tilt(config.FALL_TILT_THRESHOLD + 0.3)
     assert robot.is_fallen() is True
@@ -91,7 +117,7 @@ def test_locomotion_noop_when_no_motors_resolve(fake_webots):
 # --- Tests del gait sinusoidal (_GaitEngine) --------------------------------
 
 def test_clamp_joint_keeps_margin():
-    lo, hi = config.JOINT_LIMITS["LegLowerR"]  # (-2.25, 2.25)
+    lo, hi = config.JOINT_LIMITS["LegLowerR"]  # real PROTO: (-0.02, 2.25)
     margin = config.JOINT_LIMIT_MARGIN
     # Pedir justo el tope -> se recorta a tope-margen.
     assert _clamp_joint("LegLowerR", hi + 10.0) == pytest.approx(hi - margin)
@@ -114,7 +140,8 @@ def test_gait_targets_stay_within_safe_limits():
 
 
 def test_gait_phase_advances_on_tick(fake_webots):
-    robot, _ = _make_robot(fake_webots, "ppo")
+    # El avance de fase del gait sólo ocurre en modo gait (Plan A).
+    robot, _ = _make_robot(fake_webots, "ppo", mode="gait")
     p0 = robot.locomotion.engine.phase
     robot.walk_forward()
     robot.tick()
@@ -170,7 +197,7 @@ def test_actions_set_x_and_a_amplitudes(fake_webots):
 
 
 def test_is_fallen_true_on_low_height(fake_webots):
-    robot, supervisor = _make_robot(fake_webots, "DQN")
+    robot, supervisor = _make_robot(fake_webots, "DQN", mode="gait")
     assert robot.is_fallen() is False
     # Bajar el torso por debajo de FALL_HEIGHT_Z sin tocar el acelerómetro.
     node = supervisor.getSelf()
@@ -180,6 +207,93 @@ def test_is_fallen_true_on_low_height(fake_webots):
 
 
 def test_is_fallen_true_on_strong_tilt(fake_webots):
-    robot, supervisor = _make_robot(fake_webots, "DQN")
+    robot, supervisor = _make_robot(fake_webots, "DQN", mode="gait")
     supervisor.force_tilt(config.FALL_TILT_THRESHOLD + 0.5)
+    assert robot.is_fallen() is True
+
+
+# --- Límites de motor leídos en runtime (fix A) -----------------------------
+
+def test_backend_reads_runtime_motor_limits(fake_webots):
+    robot, _ = _make_robot(fake_webots, "DQN")
+    limits = robot.locomotion.motor_limits
+    # Todos los motores resueltos tienen límites leídos del FakeMotor.
+    assert set(limits) == set(config.MOTOR_NAMES)
+    # Y coinciden con los que expone el motor (= config.JOINT_LIMITS del mock).
+    assert limits["LegUpperR"] == config.JOINT_LIMITS["LegUpperR"]
+
+
+def test_clamp_respects_runtime_limits(fake_webots):
+    robot, _ = _make_robot(fake_webots, "DQN")
+    backend = robot.locomotion
+    lo, hi = backend.motor_limits["LegUpperR"]  # real: (-1.77, 0.45)
+    margin = config.JOINT_LIMIT_MARGIN
+    # Pedir por encima del tope real -> recortado a max-margen (nunca el tope).
+    assert backend.clamp("LegUpperR", hi + 5.0) == pytest.approx(hi - margin)
+    assert backend.clamp("LegUpperR", lo - 5.0) == pytest.approx(lo + margin)
+    assert backend.clamp("LegUpperR", hi + 5.0) < hi  # nunca exactamente el tope
+
+
+def test_apply_targets_never_exceeds_runtime_limits(fake_webots):
+    robot, _ = _make_robot(fake_webots, "DQN")
+    backend = robot.locomotion
+    margin = config.JOINT_LIMIT_MARGIN
+    # Comandar ángulos deliberadamente fuera de rango a todos los motores.
+    backend.apply_targets({name: 100.0 for name in config.MOTOR_NAMES})
+    for name, motor in backend.motors.items():
+        lo, hi = backend.motor_limits[name]
+        assert lo + margin - 1e-9 <= motor.position <= hi - margin + 1e-9, name
+
+
+# --- Pose de pie dentro de los límites (fix B) ------------------------------
+
+def test_standing_pose_within_fallback_limits_with_margin():
+    margin = config.JOINT_LIMIT_MARGIN
+    for name, angle in config.STANDING_POSE.items():
+        limits = config.JOINT_LIMITS.get(name)
+        assert limits is not None, name
+        lo, hi = limits
+        assert lo + margin <= angle <= hi - margin, (name, angle, limits)
+
+
+# --- Persistencia del acelerómetro en la caída (fix C) ----------------------
+
+def test_accel_fall_requires_persistence(fake_webots):
+    robot, supervisor = _make_robot(fake_webots, "DQN", mode="gait")
+    # Sacar SOLO el acelerómetro de banda, sin tocar altura ni orientación.
+    out_of_band = (config.ACCEL_CENTER + config.ACCEL_FALL_TOLERANCE + 50.0,
+                   config.ACCEL_CENTER, config.ACCEL_CENTER)
+    # Una única lectura fuera de banda NO declara caída.
+    supervisor._accel.set_values(out_of_band)
+    assert robot.is_fallen() is False
+    # Tras FALL_ACCEL_PERSIST_STEPS ticks consecutivos fuera de banda, SÍ.
+    for _ in range(config.FALL_ACCEL_PERSIST_STEPS):
+        result = robot.is_fallen()
+    assert result is True
+
+
+def test_accel_out_of_band_counter_resets_on_normal_reading(fake_webots):
+    robot, supervisor = _make_robot(fake_webots, "DQN", mode="gait")
+    out_of_band = (config.ACCEL_CENTER + config.ACCEL_FALL_TOLERANCE + 50.0,
+                   config.ACCEL_CENTER, config.ACCEL_CENTER)
+    supervisor._accel.set_values(out_of_band)
+    for _ in range(config.FALL_ACCEL_PERSIST_STEPS - 1):
+        robot.is_fallen()
+    # Una lectura dentro de banda reinicia el contador.
+    supervisor._accel.set_values((config.ACCEL_CENTER,) * 3)
+    assert robot.is_fallen() is False
+    assert robot._accel_out_of_band == 0
+
+
+# --- Umbral de altura (fix C) -----------------------------------------------
+
+def test_is_fallen_false_standing_true_collapsed(fake_webots):
+    robot, supervisor = _make_robot(fake_webots, "DQN", mode="gait")
+    node = supervisor.getSelf()
+    x, y, _z = node.translation
+    # De pie / levemente agachado (~0.24): NO caído.
+    node.set_translation([x, y, 0.24])
+    assert robot.is_fallen() is False
+    # Colapsado (~0.075): caído por la rama de altura.
+    node.set_translation([x, y, 0.075])
     assert robot.is_fallen() is True

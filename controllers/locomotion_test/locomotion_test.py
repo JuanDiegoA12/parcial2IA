@@ -8,26 +8,40 @@ cuatro agentes.
 Uso en Webots:
     1. Asigna este controlador a un robot DARwIn-OP del mundo (campo
        `controller "locomotion_test"`).
-    2. Elige el comando con la variable de entorno LOCO_CMD:
-           LOCO_CMD=stand    -> mantiene la pose de pie (por defecto)
-           LOCO_CMD=forward  -> camina hacia adelante
-           LOCO_CMD=left     -> gira a la izquierda
-           LOCO_CMD=right    -> gira a la derecha
-       Ejemplo: `LOCO_CMD=forward webots ./pista_atletismo_50m.wbt`
-    3. Observa en la consola el log de posición / heading / altura /
+    2. Elige el comando con PRIORIDAD:
+           a) el primer argumento de controllerArgs del .wbt (argv[1]), p.ej.
+              `controllerArgs ["forward"]`;
+           b) si no hay, la variable de entorno LOCO_CMD;
+           c) si tampoco, por defecto 'stand'.
+       Comandos válidos: stand | forward | left | right.
+           stand    -> mantiene la pose de pie (por defecto)
+           forward  -> camina hacia adelante
+           left     -> gira a la izquierda
+           right    -> gira a la derecha
+       Ejemplos: `controllerArgs ["forward"]` en el .wbt, o
+       `LOCO_CMD=forward webots ./pista_atletismo_50m.wbt`.
+    3. Al arrancar, en MODO DIAGNÓSTICO el controlador imprime los límites
+       REALES (min/max) de los 20 motores leídos con getMinPosition()/
+       getMaxPosition(); cópialos para fijar JOINT_LIMITS si hiciera falta.
+       Tras la estabilización imprime la z de pie resuelta (~0.23-0.25).
+    4. Observa en la consola el log de posición / heading / altura /
        acelerómetro en cada paso.
 
-Hallazgo sobre las advertencias de rodilla (confirmación empírica — Task 1):
-    Con el stub anterior nada accionaba los motores en Webots (su único efecto
-    era `supervisor.queue_action(...)`, método inexistente en Webots real), de
-    modo que el robot se desplomaba y sus articulaciones quedaban apoyadas
-    contra los topes. Las advertencias
-        RotationalMotor "LegLowerR/L": too big/low requested position: 2.25
-    provienen de ese COLAPSO contra el límite de la rodilla ([-2.25, 2.25]),
-    NO de que el código comandara ±2.25. Al mantener este controlador la pose
-    de pie y accionar el gait cada paso (con recorte a [min+margen, max-margen]),
-    las articulaciones dejan de reposar contra sus topes y las advertencias
-    desaparecen mientras el gait sostiene las piernas.
+Hallazgo sobre las advertencias de rodilla/cadera (origen REAL, no el mock):
+    Las advertencias provienen del MODELO Darwin-op real de Webots (su PROTO
+    remoto con rangos asimétricos y espejados), NO del stub/mock de los tests
+    (el mock nunca emite esas advertencias). Hay dos causas distintas:
+      1) "LegLowerR/L too big/low 2.25": con el stub anterior nada accionaba
+         los motores en Webots (su único efecto era `queue_action(...)`,
+         inexistente en Webots real), el robot se desplomaba y la rodilla
+         quedaba apoyada contra su tope de un solo lado (2.25 en R, -2.25 en L).
+      2) "LegUpperR 0.5 > 0.45": ese era un BUG NUESTRO: STANDING_POSE pedía
+         0.5 cuando el tope real de LegUpperR es 0.45, y el JOINT_LIMITS
+         simétrico (-1.57,1.57) de antes no lo recortaba.
+    Correcciones: la pose de pie ahora queda dentro de los límites reales con
+    margen; los límites reales se leen en RUNTIME (getMinPosition/getMaxPosition)
+    y se usan para el recorte final; y este controlador sostiene la pose/gait
+    cada paso, por lo que las articulaciones dejan de reposar contra sus topes.
 """
 
 from __future__ import annotations
@@ -53,13 +67,57 @@ _COMMANDS = {
 }
 
 
-def _read_command() -> str:
-    """Lee LOCO_CMD (stand|forward|left|right); por defecto 'stand'."""
-    value = os.environ.get("LOCO_CMD", "stand").strip().lower()
+def _read_command(argv=None) -> str:
+    """Resuelve el comando con prioridad controllerArgs -> LOCO_CMD -> 'stand'.
+
+    En Webots los controllerArgs del .wbt llegan como argv; se usa argv[1] si
+    existe. Si no, la variable de entorno LOCO_CMD. Si tampoco, 'stand'.
+    Cualquier valor fuera de {stand,forward,left,right} cae a 'stand'.
+    """
+    if argv is None:
+        argv = sys.argv
+    raw = None
+    if len(argv) > 1 and argv[1].strip():
+        raw = argv[1]
+    elif os.environ.get("LOCO_CMD", "").strip():
+        raw = os.environ.get("LOCO_CMD")
+    value = (raw or "stand").strip().lower()
     if value not in _COMMANDS:
-        print("[locomotion_test] LOCO_CMD='%s' no reconocido; uso 'stand'." % value)
+        print("[locomotion_test] comando '%s' no reconocido; uso 'stand'." % value)
         value = "stand"
     return value
+
+
+def _motor_limits(motor):
+    """Lee (min, max) reales del motor de forma defensiva; None si no se puede."""
+    get_min = getattr(motor, "getMinPosition", None)
+    get_max = getattr(motor, "getMaxPosition", None)
+    if not callable(get_min) or not callable(get_max):
+        return None
+    try:
+        return float(get_min()), float(get_max())
+    except Exception:
+        return None
+
+
+def _print_motor_diagnostics(robot: DarwinRobot) -> None:
+    """Vuelca por consola los límites REALES de los 20 motores (una línea c/u).
+
+    Para motores sin getMinPosition/getMaxPosition (p.ej. el mock) cae a
+    config.JOINT_LIMITS o imprime 'n/a'.
+    """
+    print("[locomotion_test] --- límites reales de motores (min, max) ---")
+    motors = robot.locomotion.motors
+    for name in config.MOTOR_NAMES:
+        motor = motors.get(name)
+        limits = _motor_limits(motor) if motor is not None else None
+        if limits is None:
+            limits = config.JOINT_LIMITS.get(name)
+        if limits is None:
+            print("[locomotion_test]   %-10s min=n/a    max=n/a" % name)
+        else:
+            print("[locomotion_test]   %-10s min=%.4f max=%.4f" % (name, limits[0], limits[1]))
+    print("[locomotion_test] --- fin límites de motores ---")
 
 
 def _accel_values(robot: DarwinRobot):
@@ -82,12 +140,23 @@ def main() -> None:
 
     command = _read_command()
     method = _COMMANDS[command]
-    print("[locomotion_test] robot=%s comando=%s" % (robot_name, command))
+    mode = config.resolve_locomotion_mode()
+    print("[locomotion_test] robot=%s comando=%s modo=%s" % (robot_name, command, mode))
+    if mode == "kinematic":
+        print("[locomotion_test] modo kinematic (Plan B): el Supervisor arrastra "
+              "al robot de pie; is_fallen() siempre False, sin ajuste de marcha.")
     print("[locomotion_test] motores resueltos: %d/%d" % (
         len(robot.locomotion.motors), len(config.MOTOR_NAMES)))
 
+    # Modo diagnóstico: volcar los límites reales de los 20 motores.
+    _print_motor_diagnostics(robot)
+
     # Pose de pie + estabilización inicial (asienta la física).
     robot.reset_pose(*robot.get_position())
+
+    # z de pie resuelta tras estabilizar (referencia para FALL_HEIGHT_Z y pose).
+    _, _, standing_z = robot.get_position()
+    print("[locomotion_test] z de pie resuelta tras estabilización: %.4f" % standing_z)
 
     step = 0
     while True:

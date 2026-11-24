@@ -26,6 +26,11 @@ from typing import Dict, List
 
 import pytest
 
+import config  # límites articulares de fallback para FakeMotor (pythonpath en pytest.ini)
+
+# Límites por defecto para motores sin entrada en config.JOINT_LIMITS.
+_DEFAULT_MOTOR_LIMITS = (-3.14, 3.14)
+
 # Paso cinemático de juguete por acción (en unidades del mundo / radianes).
 WALK_DELTA = 0.25   # metros por walk_forward
 TURN_DELTA = 0.20   # radianes por turn_left/turn_right
@@ -151,9 +156,18 @@ class FakeSensor:
 
 
 class FakeMotor:
+    """Motor mock con límites consultables (getMinPosition/getMaxPosition).
+
+    Emula la API de Webots que `_LocomotionBackend` lee en runtime: los límites
+    salen de config.JOINT_LIMITS[name] si existe, o de un rango amplio por
+    defecto. Así los tests pueden verificar que el recorte respeta los límites
+    reales que expone el motor.
+    """
+
     def __init__(self, name: str):
         self.name = name
         self.position = 0.0
+        self._min, self._max = config.JOINT_LIMITS.get(name, _DEFAULT_MOTOR_LIMITS)
 
     def setPosition(self, position: float) -> None:
         self.position = position
@@ -163,6 +177,12 @@ class FakeMotor:
 
     def enableTorqueFeedback(self, period: int) -> None:
         pass
+
+    def getMinPosition(self) -> float:
+        return self._min
+
+    def getMaxPosition(self) -> float:
+        return self._max
 
 
 class FakeSupervisor:

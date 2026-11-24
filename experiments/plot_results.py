@@ -67,7 +67,9 @@ def _bar_figure(summary, column: str, title: str, ylabel: str, output_png: str) 
     fig, ax = plt.subplots(figsize=(6, 4))
     algos = list(summary.index)
     values = list(summary[column])
-    ax.bar(algos, values, color=["#4C72B0", "#DD8452", "#55A868"][: len(algos)])
+    # Un color por algoritmo (PPO/DQN/A2C + agente propio CUSTOM).
+    palette = ["#4C72B0", "#DD8452", "#55A868", "#C44E52"]
+    ax.bar(algos, values, color=palette[: len(algos)])
     ax.set_title(title)
     ax.set_xlabel("Algoritmo")
     ax.set_ylabel(ylabel)

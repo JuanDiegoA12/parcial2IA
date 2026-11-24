@@ -25,14 +25,14 @@ def test_generate_configs_varies_all_four_dimensions():
     # Hiperparámetros: al menos dos combinaciones distintas a lo largo del set.
     hp_variants = {tuple(sorted(c.hyperparams.items())) for c in configs}
     assert len(hp_variants) >= 2
-    # Cubre los tres algoritmos SB3 (el propio llega en FEAT-004).
-    assert {c.algo for c in configs} == {"PPO", "DQN", "A2C"}
+    # Cubre los tres algoritmos SB3 más el agente propio (CUSTOM).
+    assert {c.algo for c in configs} == {"PPO", "DQN", "A2C", "CUSTOM"}
 
 
 def test_quick_configs_one_per_algo():
     quick = rx.generate_quick_configs()
-    assert len(quick) == 3
-    assert {c.algo for c in quick} == {"PPO", "DQN", "A2C"}
+    assert len(quick) == 4
+    assert {c.algo for c in quick} == {"PPO", "DQN", "A2C", "CUSTOM"}
 
 
 def test_csv_schema_constant():

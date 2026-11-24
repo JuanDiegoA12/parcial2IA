@@ -36,7 +36,8 @@ from typing import Dict, List, Optional, Tuple
 # resolviendo los módulos del paquete común igual que bajo pytest.ini.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for _p in (_ROOT, os.path.join(_ROOT, "controllers"),
-           os.path.join(_ROOT, "controllers", "darwin_common")):
+           os.path.join(_ROOT, "controllers", "darwin_common"),
+           os.path.join(_ROOT, "controllers", "custom_agent")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -59,15 +60,20 @@ CSV_COLUMNS: List[str] = [
     "collisions",
 ]
 
-# Algoritmos SB3 cubiertos en esta capa. El agente propio se añade en FEAT-004.
-ALGOS: Tuple[str, ...] = ("PPO", "DQN", "A2C")
+# Algoritmos cubiertos: los tres base (SB3) más el agente propio (CUSTOM), que
+# es Q-learning tabular manual (ver controllers/custom_agent/custom_agent.py).
+ALGOS: Tuple[str, ...] = ("PPO", "DQN", "A2C", "CUSTOM")
 
 # Nombre exacto del robot en el .wbt por algoritmo (ver config.START_POSITIONS).
 ROBOT_BY_ALGO: Dict[str, str] = {
     "PPO": "ppo",
     "DQN": "DQN",
     "A2C": "actor - critic",
+    "CUSTOM": "agente propio",
 }
+
+# Conjunto de algoritmos SB3 (el resto se entrena con su propio trainer).
+SB3_ALGOS: Tuple[str, ...] = ("PPO", "DQN", "A2C")
 
 # Rejillas de variación por dimensión -----------------------------------------
 # Tamaño del espacio: cota de normalización max_dist (m). Distintos "tamaños"
@@ -101,6 +107,11 @@ HYPERPARAMS: Dict[str, Tuple[Dict[str, object], ...]] = {
     "A2C": (
         {"learning_rate": 7e-4, "gamma": 0.99},
         {"learning_rate": 1e-3, "gamma": 0.98},
+    ),
+    # CUSTOM (agente propio, Q-learning tabular): variamos alpha y epsilon_decay.
+    "CUSTOM": (
+        {"alpha": 0.1, "epsilon_decay": 0.99},
+        {"alpha": 0.2, "epsilon_decay": 0.95},
     ),
 }
 
@@ -193,11 +204,27 @@ def _make_backend(robot_name: str):
         ) from exc
 
 
+def _train_custom(env, timesteps: int, hyperparams: Dict[str, object]):
+    """Entrena el agente propio (Q-learning tabular) y devuelve el modelo.
+
+    No usa stable-baselines3: importa el trainer del controlador custom_agent.
+    `timesteps` se traduce a un número de episodios cortos (como mínimo uno)
+    para mantener comparable el coste con el modo --quick de los demás.
+    """
+    import custom_agent  # controllers/custom_agent en el pythonpath
+
+    # Episodios proporcionales al presupuesto de pasos; al menos 1.
+    episodes = max(1, int(timesteps) // 64)
+    agent = custom_agent.build_agent(env, seed=0, **hyperparams)
+    custom_agent.train_agent(env, episodes=episodes, agent=agent)
+    return agent
+
+
 def run_config(cfg: ExperimentConfig, timesteps: int) -> Dict[str, object]:
     """Entrena brevemente y corre un episodio para `cfg`; devuelve una fila CSV.
 
-    Requiere stable-baselines3 instalado (import perezoso dentro de agent_runner
-    y _algo_class).
+    Los algoritmos SB3 requieren stable-baselines3 (import perezoso); el agente
+    propio (CUSTOM) usa su propio trainer tabular sin SB3.
     """
     import agent_runner  # import perezoso (arrastra race_env, no SB3 al importar)
 
@@ -209,9 +236,12 @@ def run_config(cfg: ExperimentConfig, timesteps: int) -> Dict[str, object]:
         cfg.robot_name, backend, params=params, start_position=cfg.start
     )
 
-    algo_cls = _algo_class(cfg.algo)
-    model = algo_cls("MlpPolicy", env, seed=0, **cfg.hyperparams)
-    model.learn(total_timesteps=timesteps)
+    if cfg.algo in SB3_ALGOS:
+        algo_cls = _algo_class(cfg.algo)
+        model = algo_cls("MlpPolicy", env, seed=0, **cfg.hyperparams)
+        model.learn(total_timesteps=timesteps)
+    else:  # CUSTOM: agente propio tabular
+        model = _train_custom(env, timesteps, cfg.hyperparams)
 
     metrics = agent_runner.run_race(model, env)
     return {

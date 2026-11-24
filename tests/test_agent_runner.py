@@ -68,24 +68,28 @@ class _DummyModel:
 
 def test_run_race_returns_metric_keys(fake_webots):
     backend = fake_webots.make_supervisor(self_name="ppo")
-    # Meta baja para que el episodio termine rápido avanzando (acción 0).
-    env = agent_runner.make_env("ppo", backend, goal_y=7.9)
+    # Pocos pasos para que el episodio termine por truncation sin completar la
+    # vuelta (el éxito ahora exige recorrer cp1..cp7 y volver a cp0).
+    env = agent_runner.make_env("ppo", backend)
+    env.params = env.params.override(max_episode_steps=5)
     metrics = agent_runner.run_race(_DummyModel(action=0), env)
-    assert set(metrics) == {"success", "steps", "cumulative_reward", "falls", "collisions"}
+    assert set(metrics) == {
+        "success", "steps", "cumulative_reward", "falls", "collisions",
+        "checkpoints_reached",
+    }
     assert isinstance(metrics["success"], bool)
     assert isinstance(metrics["steps"], int)
     assert isinstance(metrics["cumulative_reward"], float)
     assert isinstance(metrics["falls"], int)
     assert isinstance(metrics["collisions"], int)
-    # Avanzando hacia una meta cercana debe cruzarla.
-    assert metrics["success"] is True
+    assert isinstance(metrics["checkpoints_reached"], int)
     assert metrics["steps"] >= 1
 
 
-def test_run_race_truncates_without_crossing(fake_webots):
+def test_run_race_truncates_without_completing_lap(fake_webots):
     backend = fake_webots.make_supervisor(self_name="ppo")
-    # Meta inalcanzable y pocos pasos: termina por truncation, success False.
-    env = agent_runner.make_env("ppo", backend, goal_y=1000.0)
+    # Pocos pasos girando: no completa la vuelta -> success False, truncation.
+    env = agent_runner.make_env("ppo", backend)
     env.params = env.params.override(max_episode_steps=5)
     metrics = agent_runner.run_race(_DummyModel(action=1), env)  # solo gira
     assert metrics["success"] is False

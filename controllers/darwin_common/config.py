@@ -34,6 +34,69 @@ ACTION_MAP: Dict[int, str] = {
     2: "turn_right",
 }
 
+# --- Checkpoints de la vuelta (pista ovalada) -------------------------------
+#
+# PROBLEMA que resuelven: la pista es OVALADA y el inicio coincide con el fin
+# (los agentes arrancan en y~9, que es también la meta y=GOAL_Y). Con el esquema
+# antiguo "progreso hacia y=9" la recompensa estaba casi asegurada sin dar la
+# vuelta. La solución es una VUELTA de CHECKPOINTS ORDENADOS alrededor del óvalo:
+# el robot debe alcanzar cp1..cp7 en orden y recién entonces volver a cp0 (la
+# meta) para ganar. Cruzar y=9 sin completar la secuencia NO gana.
+#
+# Los checkpoints son nodos Ball del .wbt nombrados 'checkpoint1'..'checkpoint7';
+# la fuente AUTORITATIVA de sus coordenadas es DarwinRobot.find_checkpoints() en
+# runtime (lee el mundo). El cp0 (START/FINISH) NO es un objeto nombrado: se
+# sintetiza en (0.0, GOAL_Y). El mapa CHECKPOINT_COORDS de abajo es sólo un
+# FALLBACK documentado para el mock/tests y para degradar con gracia si falta
+# algún checkpoint en el mundo.
+
+# Radio (m) alrededor de un checkpoint para considerarlo alcanzado; también es
+# el radio de victoria alrededor de cp0 (la meta). AJUSTABLE.
+CHECKPOINT_RADIUS: float = 1.0
+
+# Peso del progreso continuo hacia el SIGUIENTE checkpoint (reducción de la
+# distancia al objetivo actual desde el paso anterior). Misma semántica que
+# PROGRESS_WEIGHT pero referido al checkpoint objetivo, no a la meta fija.
+CHECKPOINT_PROGRESS_WEIGHT: float = 10.0
+
+# Bono discreto al ALCANZAR cada checkpoint intermedio (cp1..cp7). El retorno
+# final a cp0 otorga además GOAL_BONUS y termina el episodio. AJUSTABLE.
+CHECKPOINT_BONUS: float = 20.0
+
+# Secuencia ORDENADA de la vuelta: el robot arranca en cp0, así que hay 8
+# objetivos a alcanzar en orden (cp1..cp7 y luego volver a cp0). Una sola vuelta.
+CHECKPOINT_ORDER: Tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 0)
+
+# Número total de objetivos de la vuelta (= len(CHECKPOINT_ORDER) = 8).
+TOTAL_TARGETS: int = len(CHECKPOINT_ORDER)
+
+# Penalización por salirse de la pista: distancia del robot al SEGMENTO de recta
+# entre el checkpoint predecesor y el objetivo actual (la "línea de carrera"),
+# más allá de OFF_TRACK_TOLERANCE, escalada por este peso. Mantiene al robot
+# cerca de la trayectoria ideal sin terminar el episodio. AJUSTABLE.
+OFF_TRACK_PENALTY_WEIGHT: float = 2.0
+
+# Tolerancia (m) de desviación de la línea de carrera antes de penalizar.
+# Documentado como ~semiancho de carril: dentro de esta banda no hay castigo.
+# AJUSTABLE en Webots según el ancho real de la pista.
+OFF_TRACK_TOLERANCE: float = 1.0
+
+# Coordenadas (x, y) de los checkpoints: FALLBACK para el mock/tests y para
+# degradar con gracia si algún checkpoint falta en el mundo. La fuente
+# autoritativa en runtime es find_checkpoints(). cp0 = (0.0, GOAL_Y) es la
+# meta sintetizada (sin objeto nombrado en el .wbt). cp1..cp7 replican las
+# traslaciones reales de los nodos Ball del .wbt.
+CHECKPOINT_COORDS: Dict[int, Tuple[float, float]] = {
+    0: (0.0, GOAL_Y),       # START/FINISH sintetizado (sin objeto nombrado)
+    1: (8.79, 7.98),
+    2: (13.51, 1.49),
+    3: (8.79, -7.96),
+    4: (1.46, -8.97),
+    5: (-8.5, -8.25),
+    6: (-13.48, 1.49),
+    7: (-8.5, 8.21),
+}
+
 # --- Safe learning ----------------------------------------------------------
 
 # Radio de seguridad (m): acercarse a un obstáculo u otro robot dentro de este
@@ -352,6 +415,18 @@ class RaceParams:
     fall_penalty: float = FALL_PENALTY
     collision_penalty: float = COLLISION_PENALTY
     step_penalty: float = STEP_PENALTY
+    # --- Checkpoints de la vuelta (compatibles hacia atrás con defaults) ----
+    checkpoint_radius: float = CHECKPOINT_RADIUS
+    checkpoint_progress_weight: float = CHECKPOINT_PROGRESS_WEIGHT
+    checkpoint_bonus: float = CHECKPOINT_BONUS
+    off_track_penalty_weight: float = OFF_TRACK_PENALTY_WEIGHT
+    off_track_tolerance: float = OFF_TRACK_TOLERANCE
+    checkpoint_order: Tuple[int, ...] = field(
+        default_factory=lambda: tuple(CHECKPOINT_ORDER)
+    )
+    checkpoint_coords: Dict[int, Tuple[float, float]] = field(
+        default_factory=lambda: dict(CHECKPOINT_COORDS)
+    )
 
     def override(self, **kwargs) -> "RaceParams":
         """Devuelve una copia con los campos indicados reemplazados."""

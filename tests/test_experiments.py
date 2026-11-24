@@ -48,6 +48,7 @@ def test_csv_schema_constant():
         "steps_to_goal",
         "falls",
         "collisions",
+        "checkpoints_reached",
     ]
 
 

@@ -1,9 +1,27 @@
 # Carrera DARwIn-OP con aprendizaje por refuerzo (Webots)
 
 Entorno para entrenar y comparar cuatro agentes que compiten en una carrera de
-robots humanoides DARwIn-OP sobre una pista con obstáculos en Webots R2025a. El
-robot que primero cruza la línea de meta (plano `y = GOAL_Y`, con `GOAL_Y = 9`)
-gana la carrera.
+robots humanoides DARwIn-OP sobre una pista con obstáculos en Webots R2025a.
+
+La pista es **OVALADA** y el punto de salida coincide con el de llegada (los
+agentes arrancan en `y ≈ 9`, que es también la meta `y = GOAL_Y`). Con el
+esquema antiguo "progreso hacia la meta fija `y = 9`" la recompensa estaba casi
+asegurada sin dar la vuelta. Para corregirlo, ganar exige completar una
+**VUELTA de CHECKPOINTS ORDENADOS**: `cp0 → cp1 → cp2 → … → cp7 → cp0` (una sola
+vuelta). El robot debe alcanzar `cp1..cp7` en orden y recién entonces volver a
+`cp0` (la meta). **Cruzar `y = 9` sin completar la secuencia NO gana.**
+
+Los checkpoints `cp1..cp7` son nodos `Ball` del `.wbt` nombrados
+`checkpoint1..checkpoint7`; se leen **por nombre** en runtime
+(`DarwinRobot.find_checkpoints()`), que es la fuente autoritativa de sus
+coordenadas. `cp0` (START/FINISH) no es un objeto nombrado: se **sintetiza** en
+`(0, GOAL_Y)`. El entorno de entrenamiento y el detector de ganador comparten la
+MISMA máquina de estados de la vuelta (`CheckpointTracker`), así que recompensa y
+victoria coinciden por construcción.
+
+> **Reentrenar los modelos:** la observación cambió de 5 a 7 dimensiones (ver
+> abajo), por lo que los modelos entrenados con el esquema anterior **no son
+> compatibles** y deben volver a entrenarse.
 
 ## Agentes
 
@@ -27,9 +45,9 @@ controllers/
   darwin_common/        # capa compartida (reutilizada por los 4 agentes)
     config.py           # constantes del mundo, acciones, pesos de recompensa
     darwin_robot.py     # robot de alto nivel sobre el Supervisor de Webots
-    race_env.py         # entorno gymnasium (observación/acción/recompensa)
+    race_env.py         # entorno gymnasium (observación 7-dim / acción / recompensa por checkpoints + CheckpointTracker)
     agent_runner.py     # helpers train/race para los agentes SB3
-    race.py             # detector de ganador (primer robot que cruza la meta)
+    race.py             # detector de ganador (primero en completar la vuelta de checkpoints)
   ppo_agent/ppo_agent.py
   dqn_agent/dqn_agent.py
   a2c_agent/a2c_agent.py
@@ -93,7 +111,8 @@ El **giro nunca se bloquea**, así el agente puede reorientarse y esquivar. El
 radio queda por DEBAJO de `SAFETY_RADIUS` (0.6) para que la **penalización por
 proximidad siga disparándose antes** del bloqueo, y por ENCIMA de
 `HARD_COLLISION_DISTANCE` (0.15). Las penalizaciones por proximidad/colisión y
-el cruce de `GOAL_Y` siguen **activos y sin cambios** en `race_env`.
+la condición de victoria (completar la **vuelta de checkpoints**) siguen
+**activas** en `race_env`.
 
 **Postura ERGUIDA de pie por tick (aproximación visual).** Cada tick, para
 **TODAS** las acciones (`stand`/`walk_forward`/`turn_left`/`turn_right`) —no sólo
@@ -128,8 +147,8 @@ En Plan B el robot avanza por `KINEMATIC_LINEAR_STEP` a lo largo de su heading
 (heading 0 mira a +y; avance `= (-sin θ·d, +cos θ·d)`, con `z` fija a
 `KINEMATIC_STAND_Z`) y gira `± KINEMATIC_ANGULAR_STEP` en z. La **caída está
 DESACTIVADA** (`is_fallen()` devuelve siempre `False`), pero las
-**penalizaciones por proximidad/colisión** y el **cruce de `GOAL_Y`** (victoria)
-siguen contando exactamente igual que en Plan A.
+**penalizaciones por proximidad/colisión** y la **victoria** (completar la vuelta
+de checkpoints ordenados) siguen contando exactamente igual que en Plan A.
 
 Para probar un robot aislado en modo arrastre (por defecto), lanza
 `locomotion_test` (ver más abajo) y observa en la consola cómo cambian posición
@@ -383,9 +402,11 @@ MODE=race webots pista_atletismo_50m.wbt
 ```
 
 Cada controlador carga su modelo y actúa de forma determinista. El ganador es el
-primer robot en cruzar `y = GOAL_Y`; la lógica de detección está en
-`controllers/darwin_common/race.py` (`RaceWinnerDetector` /
-`run_race_until_winner`) y es verificable sin Webots con el mock de los tests.
+**primer robot en COMPLETAR la vuelta de checkpoints ordenados**
+(`cp0 → cp1 → … → cp7 → cp0`), no el primero en cruzar `y = GOAL_Y`. La lógica de
+detección está en `controllers/darwin_common/race.py` (`RaceWinnerDetector` /
+`run_race_until_winner`), que reutiliza el mismo `CheckpointTracker` del entorno
+de entrenamiento y es verificable sin Webots con el mock de los tests.
 
 ## Pruebas
 
@@ -409,3 +430,75 @@ limpiamente si esas librerías no están instaladas.
 El entorno (`race_env.py`) penaliza acercarse a obstáculos u otros robots dentro
 de un radio de seguridad y termina el episodio ante colisiones duras o caídas,
 de modo que los agentes aprenden a no dañarse ni dañar a otros.
+
+## Vuelta de checkpoints (pista ovalada)
+
+La pista es **ovalada** y la salida coincide con la llegada, así que premiar el
+"progreso hacia `y = 9`" dejaba la recompensa casi asegurada sin dar la vuelta.
+La solución es una **vuelta de CHECKPOINTS ORDENADOS**: el robot debe alcanzar
+`cp1..cp7` **en orden** y luego volver a `cp0` (la meta) para ganar. Cruzar
+`y = 9` sin completar la secuencia **no** gana. Es **una sola vuelta**.
+
+- **Checkpoints por nombre.** `cp1..cp7` son nodos `Ball` del `.wbt`
+  (`checkpoint1..checkpoint7`), leídos en runtime por
+  `DarwinRobot.find_checkpoints()` (fuente autoritativa de sus coordenadas).
+  `cp0` (START/FINISH) no es un objeto nombrado: se **sintetiza** en
+  `(0, GOAL_Y)`. `config.CHECKPOINT_COORDS` guarda las coordenadas conocidas
+  **sólo como fallback** documentado para el mock/tests y para degradar con
+  gracia (con `RuntimeWarning`) si falta algún checkpoint en el mundo.
+- **Orden de la vuelta:** `config.CHECKPOINT_ORDER = (1, 2, 3, 4, 5, 6, 7, 0)`
+  → `TOTAL_TARGETS = 8` objetivos a alcanzar en orden.
+- **Sólo cuenta el SIGUIENTE checkpoint.** Alcanzar un checkpoint posterior
+  antes de tiempo se ignora; sólo el objetivo actual avanza la vuelta.
+- **Estado compartido.** El entorno y el detector de ganador usan la MISMA
+  máquina de estados (`CheckpointTracker`), así que recompensa y victoria
+  coinciden por construcción.
+
+### Observación (7 dimensiones, antes 5)
+
+| idx | componente | normalización |
+|-----|------------|---------------|
+| 0 | distancia al SIGUIENTE checkpoint | `min(dist / max_dist, 1)` ∈ [0, 1] |
+| 1 | ángulo al siguiente checkpoint | `clip(ángulo / π, -1, 1)` |
+| 2 | heading del robot | `clip(heading / π, -1, 1)` |
+| 3 | progreso de la vuelta | `reached_count / TOTAL_TARGETS` ∈ [0, 1] |
+| 4 | índice normalizado del siguiente checkpoint | `target_ordinal / TOTAL_TARGETS` ∈ [0, 1] |
+| 5 | distancia al obstáculo más cercano | `1` si ninguno, si no `min(dist / max_dist, 1)` |
+| 6 | distancia al robot más cercano | `1` si ninguno, si no `min(dist / max_dist, 1)` |
+
+> **Reentrenar:** la observación cambió de 5 a 7 dimensiones, así que los
+> modelos previos **no** son compatibles y deben volver a entrenarse. Los
+> controladores leen la dimensión del `observation_space`, así que no hay nada
+> hardcodeado que tocar; sólo hay que reentrenar.
+
+### Recompensa por checkpoints
+
+- **+ progreso continuo** hacia el siguiente checkpoint:
+  `CHECKPOINT_PROGRESS_WEIGHT · (reducción de distancia al objetivo este paso)`.
+- **+ bono discreto** `CHECKPOINT_BONUS` al **alcanzar** cada checkpoint
+  intermedio (dentro de `CHECKPOINT_RADIUS`); luego avanza el objetivo.
+- **+ `GOAL_BONUS`** y `terminated` al **cerrar la vuelta** (volver a `cp0` tras
+  `cp1..cp7`).
+- **− penalización off-track:** distancia del robot al **segmento de recta**
+  entre el predecesor y el objetivo actual (la línea de carrera), más allá de
+  `OFF_TRACK_TOLERANCE`, escalada por `OFF_TRACK_PENALTY_WEIGHT`. No termina el
+  episodio; es determinista.
+- Se mantienen **sin cambios** las penalizaciones de safe-learning: proximidad a
+  obstáculos/otros robots, colisión dura (termina), caída (termina) y el pequeño
+  costo por paso.
+
+### Tunables de la vuelta (en `config.py`)
+
+| Constante | Qué controla |
+|-----------|--------------|
+| `CHECKPOINT_RADIUS` | Radio (m, `1.0`) para dar por alcanzado un checkpoint; también el radio de victoria alrededor de `cp0`. |
+| `CHECKPOINT_PROGRESS_WEIGHT` | Peso del progreso continuo hacia el siguiente checkpoint (`10.0`). |
+| `CHECKPOINT_BONUS` | Bono discreto al alcanzar cada checkpoint intermedio (`20.0`). |
+| `OFF_TRACK_PENALTY_WEIGHT` | Peso de la penalización por desviarse de la línea de carrera (`2.0`). |
+| `OFF_TRACK_TOLERANCE` | Desviación (m, `1.0`, ~semiancho de carril) tolerada antes de penalizar. |
+| `CHECKPOINT_ORDER` | Orden de la vuelta (`(1,2,3,4,5,6,7,0)`), `TOTAL_TARGETS = 8`. |
+| `CHECKPOINT_COORDS` | Coordenadas fallback de `cp0..cp7` para el mock/tests (la fuente autoritativa es `find_checkpoints()`). |
+
+Las métricas de los experimentos añaden una columna `checkpoints_reached`
+(máximo de checkpoints alcanzados por episodio); las columnas anteriores se
+conservan y `success` ahora significa **"completó la vuelta"**.

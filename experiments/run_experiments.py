@@ -58,6 +58,7 @@ CSV_COLUMNS: List[str] = [
     "steps_to_goal",
     "falls",
     "collisions",
+    "checkpoints_reached",
 ]
 
 # Algoritmos cubiertos: los tres base (SB3) más el agente propio (CUSTOM), que
@@ -255,6 +256,7 @@ def run_config(cfg: ExperimentConfig, timesteps: int) -> Dict[str, object]:
         "steps_to_goal": metrics["steps"] if metrics["success"] else -1,
         "falls": metrics["falls"],
         "collisions": metrics["collisions"],
+        "checkpoints_reached": metrics.get("checkpoints_reached", 0),
     }
 
 

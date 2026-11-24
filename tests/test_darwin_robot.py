@@ -99,6 +99,30 @@ def test_find_barriers_returns_twelve(fake_webots):
     assert all(name.startswith("valla") for name in barriers)
 
 
+def test_find_checkpoints_returns_seven(fake_webots):
+    robot, _ = _make_robot(fake_webots, "DQN")
+    cps = robot.find_checkpoints()
+    assert set(cps) == {1, 2, 3, 4, 5, 6, 7}  # cp0 NO es objeto nombrado
+    # Coordenadas reales del .wbt (fuente autoritativa en runtime).
+    assert cps[1] == pytest.approx((8.79, 7.98))
+    assert cps[2] == pytest.approx((13.51, 1.49))
+    assert cps[7] == pytest.approx((-8.5, 8.21))
+
+
+def test_ordered_checkpoints_synthesizes_cp0_and_orders(fake_webots):
+    robot, _ = _make_robot(fake_webots, "DQN")
+    ordered = robot.ordered_checkpoints()
+    # 8 objetivos: cp1..cp7 y luego volver a cp0.
+    assert len(ordered) == config.TOTAL_TARGETS
+    # El primer objetivo es cp1; el último es cp0 sintetizado en (0, GOAL_Y).
+    assert ordered[0] == pytest.approx((8.79, 7.98))
+    assert ordered[-1] == pytest.approx((0.0, config.GOAL_Y))
+    # El orden coincide con CHECKPOINT_ORDER.
+    for pos, index in zip(ordered, config.CHECKPOINT_ORDER):
+        expected = (0.0, config.GOAL_Y) if index == 0 else config.CHECKPOINT_COORDS[index]
+        assert pos == pytest.approx(expected)
+
+
 def test_is_supervisor_true_when_self_node_resolves(fake_webots):
     robot, _ = _make_robot(fake_webots, "DQN")
     assert robot.is_supervisor() is True

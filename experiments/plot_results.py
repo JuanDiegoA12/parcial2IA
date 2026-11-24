@@ -39,7 +39,8 @@ def summarize(input_csv: str = EXPERIMENTS_CSV, summary_csv: str = SUMMARY_CSV):
     import pandas as pd  # import perezoso
 
     df = pd.read_csv(input_csv)
-    summary = df.groupby("algo").agg(
+    # Agregaciones base (compatibles con CSVs antiguos sin checkpoints_reached).
+    agg = dict(
         cumulative_reward=("cumulative_reward", "mean"),
         success_rate=("success", "mean"),
         steps_to_goal=("steps_to_goal", "mean"),
@@ -47,6 +48,11 @@ def summarize(input_csv: str = EXPERIMENTS_CSV, summary_csv: str = SUMMARY_CSV):
         collisions=("collisions", "mean"),
         n_configs=("config_id", "count"),
     )
+    # Columna nueva (vuelta de checkpoints): sólo si el CSV la trae, para seguir
+    # cargando CSVs antiguos sin ella. success ahora = "completó la vuelta".
+    if "checkpoints_reached" in df.columns:
+        agg["checkpoints_reached"] = ("checkpoints_reached", "mean")
+    summary = df.groupby("algo").agg(**agg)
 
     directory = os.path.dirname(summary_csv)
     if directory:

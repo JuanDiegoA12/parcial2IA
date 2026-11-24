@@ -83,11 +83,12 @@ def run_race(model, env, deterministic: bool = True) -> Dict[str, object]:
     Returns
     -------
     dict con las claves:
-        success (bool): el robot cruzó la meta.
+        success (bool): el robot COMPLETÓ la vuelta de checkpoints.
         steps (int): pasos ejecutados en el episodio.
         cumulative_reward (float): recompensa acumulada.
         falls (int): número de caídas detectadas.
         collisions (int): número de colisiones duras detectadas.
+        checkpoints_reached (int): máximo de checkpoints alcanzados en el episodio.
     """
     obs, _info = env.reset()
     cumulative_reward = 0.0
@@ -95,6 +96,7 @@ def run_race(model, env, deterministic: bool = True) -> Dict[str, object]:
     falls = 0
     collisions = 0
     success = False
+    checkpoints_reached = 0
 
     terminated = False
     truncated = False
@@ -109,6 +111,7 @@ def run_race(model, env, deterministic: bool = True) -> Dict[str, object]:
             collisions += 1
         if info.get("success"):
             success = True
+        checkpoints_reached = max(checkpoints_reached, int(info.get("checkpoints_reached", 0)))
 
     return {
         "success": bool(success),
@@ -116,6 +119,7 @@ def run_race(model, env, deterministic: bool = True) -> Dict[str, object]:
         "cumulative_reward": float(cumulative_reward),
         "falls": int(falls),
         "collisions": int(collisions),
+        "checkpoints_reached": int(checkpoints_reached),
     }
 
 

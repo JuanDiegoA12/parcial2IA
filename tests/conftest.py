@@ -63,6 +63,20 @@ _BARRIERS = {
     "valla 1(3)": (16.685, -0.113996, 0.0),
 }
 
+# Los 7 checkpoints de la vuelta (nodos Ball 'checkpoint1'..'checkpoint7' del
+# .wbt). cp0 (START/FINISH) NO es un objeto: lo sintetiza ordered_checkpoints
+# en (0, GOAL_Y). z=0.0625 replica la traslación real de las bolas. Los nombres
+# NO empiezan por 'valla', así que find_barriers() sigue devolviendo 12.
+_CHECKPOINTS = {
+    "checkpoint1": (8.79, 7.98, 0.0625),
+    "checkpoint2": (13.51, 1.49, 0.0625),
+    "checkpoint3": (8.79, -7.96, 0.0625),
+    "checkpoint4": (1.46, -8.97, 0.0625),
+    "checkpoint5": (-8.5, -8.25, 0.0625),
+    "checkpoint6": (-13.48, 1.49, 0.0625),
+    "checkpoint7": (-8.5, 8.21, 0.0625),
+}
+
 
 class FakeField:
     """Campo SF* de un nodo (translation o rotation)."""
@@ -392,6 +406,8 @@ class FakeWebots:
             name: FakeNode(name, translation) for name, translation in _ROBOT_STARTS.items()
         }
         for name, translation in _BARRIERS.items():
+            FakeSupervisor._world[name] = FakeNode(name, translation)
+        for name, translation in _CHECKPOINTS.items():
             FakeSupervisor._world[name] = FakeNode(name, translation)
         FakeSupervisor._root = FakeRoot(list(FakeSupervisor._world.values()))
         self._installed = []

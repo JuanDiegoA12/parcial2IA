@@ -82,7 +82,10 @@ def test_run_race_returns_metrics(fake_webots):
     custom_agent.train_agent(env, episodes=3, agent=agent)
 
     metrics = agent_runner.run_race(agent, env)
-    assert set(metrics) == {"success", "steps", "cumulative_reward", "falls", "collisions"}
+    assert set(metrics) == {
+        "success", "steps", "cumulative_reward", "falls", "collisions",
+        "checkpoints_reached",
+    }
     assert isinstance(metrics["success"], bool)
     assert isinstance(metrics["steps"], int) and metrics["steps"] >= 1
 

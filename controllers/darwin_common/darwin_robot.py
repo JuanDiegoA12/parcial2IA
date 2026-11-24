@@ -850,3 +850,75 @@ class DarwinRobot:
             if xy is not None:
                 barriers[name] = xy
         return barriers
+
+    def find_checkpoints(self) -> Dict[int, Tuple[float, float]]:
+        """Checkpoints de la vuelta por índice (nodos 'checkpoint<N>', N>=1).
+
+        Escanea la escena igual que find_barriers()/find_others() y devuelve
+        {indice: (x, y)} para los nodos cuyo nombre es 'checkpoint' seguido de
+        un entero. NO incluye el cp0 (START/FINISH), que no es un objeto
+        nombrado y se sintetiza en (0, GOAL_Y) por `ordered_checkpoints`.
+
+        La fuente AUTORITATIVA de las coordenadas es el mundo en runtime; el
+        mapa config.CHECKPOINT_COORDS es sólo un fallback para el mock/tests.
+        """
+        checkpoints: Dict[int, Tuple[float, float]] = {}
+        for node in _iter_world_nodes(self.backend):
+            name = _node_name(node)
+            if name is None or not name.startswith("checkpoint"):
+                continue
+            suffix = name[len("checkpoint"):]
+            if not suffix.isdigit():
+                continue
+            index = int(suffix)
+            xy = _node_xy(node)
+            if xy is not None:
+                checkpoints[index] = xy
+        return checkpoints
+
+    def ordered_checkpoints(
+        self,
+        order: Tuple[int, ...] = None,
+        goal_y: Optional[float] = None,
+    ) -> List[Tuple[float, float]]:
+        """Lista ORDENADA de coordenadas de la vuelta según `order`.
+
+        - cp0 (START/FINISH) se sintetiza en (0.0, goal_y) (no es objeto nombrado).
+        - cp1..cp7 se leen de find_checkpoints() (mundo en runtime); si alguno
+          falta, cae a config.CHECKPOINT_COORDS y emite un RuntimeWarning.
+
+        Devuelve las coordenadas en el mismo orden que `order`
+        (config.CHECKPOINT_ORDER por defecto: cp1..cp7 y luego volver a cp0),
+        de modo que el entorno y el detector de ganador comparten la MISMA
+        secuencia por construcción.
+        """
+        if order is None:
+            order = config.CHECKPOINT_ORDER
+        if goal_y is None:
+            goal_y = config.GOAL_Y
+
+        scanned = self.find_checkpoints()
+        fallback = config.CHECKPOINT_COORDS
+
+        resolved: Dict[int, Tuple[float, float]] = {}
+        missing: List[int] = []
+        for index in set(order):
+            if index == 0:
+                resolved[0] = (0.0, float(goal_y))
+                continue
+            if index in scanned:
+                resolved[index] = scanned[index]
+            elif index in fallback:
+                resolved[index] = fallback[index]
+                missing.append(index)
+            else:
+                missing.append(index)
+        if missing:
+            warnings.warn(
+                "Checkpoints no encontrados en el mundo "
+                f"{sorted(missing)}; usando config.CHECKPOINT_COORDS como "
+                "fallback (revisa que 'checkpoint1'..'checkpoint7' estén en el .wbt).",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return [resolved[index] for index in order if index in resolved]

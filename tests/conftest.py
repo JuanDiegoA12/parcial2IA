@@ -130,9 +130,14 @@ class FakeRoot:
 
 
 class FakeSensor:
-    """Acelerómetro / giroscopio con valores forzables."""
+    """Acelerómetro / giroscopio con valores forzables.
 
-    def __init__(self, values=(0.0, 0.0, 9.81)):
+    Modela el acelerómetro del DARwIn-OP de Webots: de pie cada eje lee
+    centrado en ~512 (no un modelo (0,0,9.81)). Por eso el valor por defecto es
+    (512, 512, 512); una caída se fuerza con FakeSupervisor.force_tilt.
+    """
+
+    def __init__(self, values=(512.0, 512.0, 512.0)):
         self._values = list(values)
 
     def enable(self, sampling_period: int) -> None:
@@ -230,10 +235,37 @@ class FakeSupervisor:
         self._pending_action = action
 
     def force_tilt(self, tilt_rad: float) -> None:
-        """Fuerza una inclinación del torso (simula una caída)."""
-        # Acelerómetro: un robot de pie lee ~(0,0,9.81). Al inclinarse, la
-        # gravedad se proyecta en x. Guardamos el ángulo directamente en x.
-        self._accel.set_values((math.sin(tilt_rad) * 9.81, 0.0, math.cos(tilt_rad) * 9.81))
+        """Interruptor único de "forzar caída", coherente con is_fallen().
+
+        `is_fallen()` combina tres señales (acelerómetro centrado ~512,
+        orientación del torso y altura). Para que un valor grande de
+        `tilt_rad` sea inequívocamente una caída y uno pequeño no lo sea,
+        `force_tilt` ajusta las TRES de forma coherente:
+
+        - Acelerómetro: desvía los ejes de 512 en proporción a tilt_rad (una
+          inclinación grande saca la lectura de la banda tolerada).
+        - Orientación: fija una rotación de `tilt_rad` alrededor de un eje
+          horizontal (x) para que el torso aparezca volcado.
+        - Altura: baja la z del torso cuando la inclinación es grande.
+
+        Con tilt_rad pequeño (p.ej. 0.1) las tres señales quedan dentro de lo
+        normal -> no caído.
+        """
+        # (a) Acelerómetro: desviación proporcional a la inclinación. Con
+        # tilt grande la desviación supera ACCEL_FALL_TOLERANCE (~80).
+        deviation = math.sin(tilt_rad) * 512.0
+        self._accel.set_values((512.0 + deviation, 512.0, 512.0 - deviation))
+
+        # (b) Orientación: rotación alrededor del eje x horizontal (vuelco).
+        node = self._world[self.self_name]
+        node.set_rotation([1.0, 0.0, 0.0, float(tilt_rad)])
+
+        # (c) Altura: baja el torso cuando la inclinación es grande; con
+        # inclinación pequeña lo restaura a una altura de pie segura (coherente
+        # con "no caído"), de modo que force_tilt sea reversible.
+        x, y, _z = node.translation
+        new_z = 0.1 if tilt_rad > 0.5 else 0.3
+        node.set_translation([x, y, new_z])
 
     def _apply_kinematics(self) -> None:
         action = self._pending_action

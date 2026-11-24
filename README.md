@@ -34,6 +34,7 @@ controllers/
   dqn_agent/dqn_agent.py
   a2c_agent/a2c_agent.py
   custom_agent/custom_agent.py   # agente propio (Taller 2)
+  locomotion_test/locomotion_test.py  # prueba de locomoción sin RL (LOCO_CMD)
 experiments/
   run_experiments.py    # >=20 configuraciones -> results/experiments.csv
   plot_results.py        # tabla resumen + figuras comparativas (PNG)
@@ -42,6 +43,86 @@ results/                # CSV y figuras generadas
 tests/                  # suite pytest con mock de Webots (no requiere simulador)
 pista_atletismo_50m.wbt # mundo de Webots
 ```
+
+## Locomoción (gait sinusoidal)
+
+El DARwIn-OP **no** usa los managers de Robotis (`RobotisOp2GaitManager` /
+`RobotisOp2MotionManager`): esos existen únicamente como binario **C++**, de
+modo que `import managers` lanza `ModuleNotFoundError` en Python y no hay vía
+oficial de Python para caminar. Por eso la locomoción se implementa accionando
+**directamente los 20 motores** del robot con un **gait sinusoidal propio**
+(`_GaitEngine` en `controllers/darwin_common/darwin_robot.py`), que ejecuta
+`setPosition` sobre cada motor en **cada paso de simulación**.
+
+El agente sigue eligiendo solo acciones discretas de alto nivel
+(`0` walk_forward, `1` turn_left, `2` turn_right); el motor de gait las traduce
+a una amplitud de avance (x) y una de giro (a), análogas a
+`setXAmplitude`/`setAAmplitude` del controlador C++. Cada ángulo comandado se
+recorta a `[min + margen, max - margen]`, así que **nunca** se pide a una
+articulación su tope físico.
+
+### Sobre las advertencias `RotationalMotor "LegLowerR/L": too big/low ... 2.25`
+
+Provienen del **colapso** del robot cuando nada acciona sus motores (el stub
+anterior solo llamaba a `supervisor.queue_action(...)`, un método inexistente
+en Webots real), por lo que las piernas quedaban apoyadas contra el límite de la
+rodilla (`[-2.25, 2.25]` rad). **No** las causa el código comandando ±2.25. Con
+el gait sosteniendo las piernas cada paso (y el recorte con margen), las
+articulaciones dejan de reposar contra sus topes y las advertencias desaparecen.
+Esto se confirma empíricamente con el controlador `locomotion_test` (ver abajo).
+
+### Parámetros ajustables (en `controllers/darwin_common/config.py`)
+
+Todas las constantes del gait están centralizadas y comentadas; afínalas en
+Webots observando el comportamiento real:
+
+| Constante | Qué controla |
+|-----------|--------------|
+| `STANDING_POSE` | Ángulos nominales de la pose de pie (brazos/caderas/rodillas/tobillos). |
+| `GAIT_PERIOD` / `GAIT_FREQUENCY` | Duración de un ciclo de marcha en pasos de simulación (uno deriva del otro). |
+| `GAIT_X_AMPLITUDE` | Amplitud de avance al caminar hacia adelante. |
+| `GAIT_A_AMPLITUDE` | Amplitud de giro al girar. |
+| `GAIT_HIP_AMPLITUDE`, `GAIT_KNEE_AMPLITUDE`, `GAIT_ANKLE_AMPLITUDE` | Amplitud articular de cadera, rodilla y tobillo. |
+| `GAIT_LATERAL_SWAY` | Balanceo lateral del peso (pelvis/tobillos). |
+| `GAIT_LEG_PHASE_OFFSET` | Desfase entre piernas (180° = `math.pi`). |
+| `MOTOR_VELOCITY` | Velocidad por defecto de los motores. |
+| `JOINT_LIMITS`, `JOINT_LIMIT_MARGIN` | Límites por articulación y margen de seguridad. |
+| `STABILIZATION_STEPS` | Ticks quietos de pie antes de cada episodio. |
+| `FALL_TILT_THRESHOLD`, `ACCEL_CENTER`, `ACCEL_FALL_TOLERANCE`, `FALL_HEIGHT_Z` | Umbrales de detección de caída. |
+
+> **Nota (asunción):** los límites articulares distintos de la rodilla usan
+> rangos conservadores documentados en `config.py`; el PROTO `Darwin-op.proto`
+> no pudo consultarse en el entorno de desarrollo. Ajústalos si observas recorte
+> excesivo contra los topes reales del modelo.
+
+### Detección de caída
+
+`DarwinRobot.is_fallen()` combina tres señales (cualquiera activa = caído):
+acelerómetro centrado en ~`ACCEL_CENTER` (512) con desviación mayor que
+`ACCEL_FALL_TOLERANCE`, inclinación del torso (campo `rotation` del Supervisor)
+sobre `FALL_TILT_THRESHOLD`, y altura `z` del torso bajo `FALL_HEIGHT_Z`.
+
+### Validar la locomoción antes de entrenar (`locomotion_test`)
+
+Primero valida **un solo robot** (que se mantenga de pie, avance y gire) con el
+controlador de prueba, **sin** ejecutar ningún algoritmo de RL. Asigna el
+controlador `locomotion_test` a un robot (campo `controller "locomotion_test"`)
+y elige el comando con la variable de entorno `LOCO_CMD`:
+
+```bash
+LOCO_CMD=stand   webots pista_atletismo_50m.wbt   # mantener la pose de pie
+LOCO_CMD=forward webots pista_atletismo_50m.wbt   # caminar hacia adelante
+LOCO_CMD=left    webots pista_atletismo_50m.wbt   # girar a la izquierda
+LOCO_CMD=right   webots pista_atletismo_50m.wbt   # girar a la derecha
+```
+
+(Opcional: `LOCO_ROBOT` elige el robot por nombre, por defecto `DQN`.) El
+controlador registra en consola posición, heading, altura y acelerómetro cada
+pocos pasos. **La validación física real de la caminata ocurre en Webots por
+parte del usuario**: el entorno de desarrollo no tiene runtime de Webots.
+
+Flujo recomendado: **(1)** validar la locomoción de un robot con
+`locomotion_test`; **(2)** solo entonces integrar y entrenar los cuatro agentes.
 
 ## 1. Preparar el entorno de Python
 
@@ -135,6 +216,12 @@ python3 -m pytest tests/ -q
 
 Los tests que dependen de stable-baselines3, tensorflow o matplotlib se saltan
 limpiamente si esas librerías no están instaladas.
+
+> **Fallo conocido:** `tests/test_wbt.py::test_robot_geometry_and_flags_unchanged`
+> falla porque el usuario reposicionó manualmente los robots dentro de Webots, de
+> modo que las coordenadas del `.wbt` ya no coinciden con las esperadas. No lo
+> provoca la locomoción y corregirlo exigiría editar la geometría del robot (lo
+> cual está fuera de alcance). El resto de la suite pasa.
 
 ## Safe learning
 
